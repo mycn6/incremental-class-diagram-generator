@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from copy import deepcopy
+from dataclasses import fields
 from io import StringIO
 from pathlib import Path
 import re
+from typing import Iterator
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
-from diagram_gen import ClassInfo, build_drawio, class_sections, extract_python
+import diagram_gen
+import facts_io
+from diagram_gen import (
+    ChangedFile,
+    ClassInfo,
+    build_drawio,
+    build_facts,
+    class_sections,
+    export_diagram,
+    extract_python,
+    facts_to_classes,
+    main,
+)
 from layout_drawio import ENGINE, SUPPORT_GAP, LayoutIssue, check_document, optimize
 from style_drawio import apply, set_style
 from text_layout import (
@@ -876,6 +891,330 @@ class TextFitRuleTests(unittest.TestCase):
         # fit check nor the semantic checks may unescape a second time.
         self.assertEqual("a &amp; b", plain_label("a &amp; b", {}))
         self.assertEqual("a &amp; b", visible("a &amp; b"))
+
+
+ROOT = Path(__file__).parents[1]
+
+
+@contextmanager
+def quiet() -> Iterator[None]:
+    """Swallow both streams for a run whose output the test does not assert on.
+
+    A passing suite should print nothing but its own summary, so the messages a
+    command-line run emits on purpose cannot be mistaken for failures.
+    """
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        yield
+
+_CLASS_FIELDS = frozenset(field.name for field in fields(facts_io.ClassFact))
+_RELATION_FIELDS = frozenset(field.name for field in fields(facts_io.RelationFact))
+
+
+def facts_with(
+    classes: list[facts_io.ClassFact],
+    relations: list[facts_io.RelationFact] | None = None,
+    files: list[str] | None = None,
+) -> facts_io.Facts:
+    return facts_io.Facts(
+        scope={"label": "test", "base": "HEAD", "head": "WORKTREE", "window": ""},
+        classes=classes,
+        relations=relations or [],
+        files=files if files is not None else [],
+    )
+
+
+def simple_class(identifier: str, **overrides) -> facts_io.ClassFact:
+    payload = {
+        "id": identifier,
+        "name": identifier,
+        "kind": "class",
+        "change": "modified",
+        "source": "src/app.py",
+        "origin": "scan",
+    }
+    payload.update(overrides)
+    # Anything the dataclass does not declare is an unknown key by definition,
+    # which is exactly the case `extra` exists to carry.
+    extra = {key: payload.pop(key) for key in list(payload) if key not in _CLASS_FIELDS}
+    return facts_io.ClassFact(**payload, extra=extra)
+
+
+def simple_relation(**overrides) -> facts_io.RelationFact:
+    payload = {
+        "source_id": "OrderService",
+        "target_id": "Repo",
+        "target_declared": "Repo",
+        "kind": "association",
+        "evidence": "svc.py: OrderService stores Repo",
+        "origin": "agent",
+    }
+    payload.update(overrides)
+    extra = {key: payload.pop(key) for key in list(payload) if key not in _RELATION_FIELDS}
+    return facts_io.RelationFact(**payload, extra=extra)
+
+
+class FactsSchemaTests(unittest.TestCase):
+    """The inventory carries the deliverable, so its own rules have to hold."""
+
+    def test_a_round_trip_preserves_structure_and_bytes(self) -> None:
+        original = facts_with([simple_class("OrderService")], [simple_relation()])
+        reloaded = facts_io.loads(facts_io.dumps(original))
+        self.assertEqual(facts_io.to_payload(original), facts_io.to_payload(reloaded))
+        self.assertEqual(facts_io.dumps(original), facts_io.dumps(reloaded))
+
+    def test_dump_is_deterministic(self) -> None:
+        first = facts_io.dumps(facts_with([simple_class("A"), simple_class("B")]))
+        second = facts_io.dumps(facts_with([simple_class("A"), simple_class("B")]))
+        self.assertEqual(first, second)
+
+    def test_a_relation_to_an_unknown_class_is_refused(self) -> None:
+        errors, _ = facts_io.validate_facts(
+            facts_with([simple_class("OrderService")], [simple_relation(target_id="Ghost")])
+        )
+        self.assertTrue(any("Ghost" in error and "not a class" in error for error in errors), errors)
+
+    def test_an_unresolved_relation_must_still_name_its_declared_target(self) -> None:
+        errors, _ = facts_io.validate_facts(
+            facts_with(
+                [simple_class("OrderService")],
+                [simple_relation(target_id=None, target_declared="")],
+            )
+        )
+        self.assertTrue(any("must still name" in error for error in errors), errors)
+
+    def test_empty_evidence_is_refused(self) -> None:
+        errors, _ = facts_io.validate_facts(
+            facts_with([simple_class("OrderService")], [simple_relation(evidence="   ")])
+        )
+        self.assertTrue(any("evidence must not be empty" in error for error in errors), errors)
+
+    def test_a_source_outside_the_repository_is_refused(self) -> None:
+        for source in ("", "/etc/passwd", "C:/tmp/x.py", "../outside.py"):
+            with self.subTest(source=source):
+                errors, _ = facts_io.validate_facts(facts_with([simple_class("A", source=source)]))
+                self.assertTrue(errors, f"{source!r} should be refused")
+
+    def test_an_off_page_target_is_allowed_and_stays_quiet(self) -> None:
+        # A framework base is the documented exclusion. Refusing it, or warning
+        # on it, would make every ordinary scan look broken.
+        errors, warnings = facts_io.validate_facts(
+            facts_with(
+                [simple_class("OrderService")],
+                [simple_relation(target_id=None, target_declared="BaseModel",
+                                 evidence="svc.py: OrderService extends BaseModel")],
+            )
+        )
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_evidence_that_omits_the_target_warns_without_failing(self) -> None:
+        # Evidence may name the target through a variable, so this cannot be an
+        # error - an over-strict validator sends the author back to hand-editing
+        # the exported XML.
+        errors, warnings = facts_io.validate_facts(
+            facts_with([simple_class("OrderService"), simple_class("Repo")],
+                       [simple_relation(evidence="svc.py: OrderService stores the gateway")]
+            )
+        )
+        self.assertEqual([], errors)
+        self.assertTrue(any("does not mention" in warning for warning in warnings), warnings)
+
+    def test_unknown_keys_survive_a_round_trip(self) -> None:
+        original = facts_with([simple_class("A", note="keep me")])
+        reloaded = facts_io.loads(facts_io.dumps(original))
+        self.assertEqual({"note": "keep me"}, reloaded.classes[0].extra)
+        self.assertEqual(facts_io.dumps(original), facts_io.dumps(reloaded))
+
+    def test_two_classes_with_one_name_get_distinct_ids(self) -> None:
+        taken: set[str] = set()
+        first = facts_io.derive_id("User", taken)
+        taken.add(first)
+        second = facts_io.derive_id("User", taken)
+        self.assertEqual(("User", "User#2"), (first, second))
+
+
+class FactsMergeTests(unittest.TestCase):
+    """Re-scanning must refresh the scan, not destroy the review."""
+
+    def test_reviewed_entries_survive_and_scanned_ones_are_replaced(self) -> None:
+        existing = facts_with(
+            [simple_class("Keep", origin="agent", change="unchanged"), simple_class("Stale")],
+            [simple_relation(source_id="Keep", target_id="Keep", target_declared="Keep")],
+            files=["src/app.py"],
+        )
+        fresh = facts_with([simple_class("Stale", change="added")], files=["src/app.py"])
+        merged = facts_io.merge_facts(existing, fresh)
+
+        self.assertEqual(["Stale", "Keep"], [fact.id for fact in merged.classes])
+        self.assertEqual("added", merged.classes[0].change)
+        self.assertEqual("agent", merged.classes[1].origin)
+        self.assertEqual(1, len(merged.relations))
+
+    def test_a_reviewed_class_the_scan_now_covers_is_reported(self) -> None:
+        existing = facts_with([simple_class("Orders", origin="agent", change="unchanged")])
+        fresh = facts_with([simple_class("Orders", change="modified")])
+        merged = facts_io.merge_facts(existing, fresh)
+        self.assertEqual(1, len(merged.classes))
+        self.assertEqual("scan", merged.classes[0].origin)
+        self.assertTrue(any("now in the change set" in warning for warning in merged.warnings),
+                        merged.warnings)
+
+    def test_scope_matching_ignores_the_timestamp_but_not_the_range(self) -> None:
+        current = {"base": "HEAD", "head": "WORKTREE", "window": "", "generated_at": "noon"}
+        self.assertTrue(facts_io.scope_matches({**current, "generated_at": "dawn"}, current))
+        self.assertFalse(facts_io.scope_matches({**current, "window": "2020-01-01"}, current))
+        self.assertFalse(facts_io.scope_matches({**current, "head": "HEAD~3"}, current))
+
+
+class FactsExportTests(unittest.TestCase):
+    """The .drawio is a pure function of the inventory, never read back in."""
+
+    def edges(self, document: ET.Element) -> list[tuple[str, str, str, str]]:
+        root = document.find("diagram/mxGraphModel/root")
+        assert root is not None
+        symbols = {item.get("id"): item.get("symbol") for item in root if item.get("role") == "class"}
+        result = []
+        for item in root:
+            if item.get("role") != "relationship":
+                continue
+            cell = item.find("mxCell")
+            assert cell is not None
+            result.append((
+                symbols.get(cell.get("source")),
+                symbols.get(cell.get("target")),
+                item.get("relation"),
+                item.get("evidence"),
+            ))
+        return result
+
+    def test_the_example_inventory_exports_a_contract_valid_diagram(self) -> None:
+        path = Path(__file__).parents[1] / "assets" / "class-facts-example.json"
+        facts = facts_io.load_facts(path)
+        errors, warnings = facts_io.validate_facts(facts)
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+        document = build_drawio(facts_to_classes(facts), "example")
+        self.assertEqual([], validate_document(document))
+        self.assertEqual([], check_document(document))
+
+    def test_a_reviewed_relation_exports_with_its_evidence_verbatim(self) -> None:
+        facts = facts_with(
+            [simple_class("OrderService"), simple_class("Repo")],
+            [simple_relation(evidence="svc.py: OrderService.__init__ stores Repo")],
+        )
+        edges = self.edges(build_drawio(facts_to_classes(facts), "test"))
+        self.assertEqual(
+            [("OrderService", "Repo", "association", "svc.py: OrderService.__init__ stores Repo")],
+            edges,
+        )
+
+    def test_a_reviewed_unchanged_class_has_no_visible_status_prefix(self) -> None:
+        facts = facts_with([simple_class("Repository", kind="interface", change="unchanged",
+                                         origin="agent")])
+        document = build_drawio(facts_to_classes(facts), "test")
+        root = document.find("diagram/mxGraphModel/root")
+        assert root is not None
+        header = next(item for item in root if item.get("role") == "class-header")
+        self.assertEqual("«interface»\nRepository", header.get("label"))
+
+    def test_a_pinned_target_disambiguates_two_classes_that_share_a_name(self) -> None:
+        # A name lookup cannot express this; the inventory's id can, and the
+        # export must honour it rather than falling back to guessing.
+        classes = [
+            simple_class("User", name="User", source="models.py"),
+            simple_class("User#2", name="User", source="schemas.py"),
+            simple_class("Admin", name="Admin", change="added"),
+        ]
+        facts = facts_with(
+            classes,
+            [simple_relation(source_id="Admin", target_id="User#2", target_declared="User",
+                             kind="dependency", evidence="admin.py: Admin validates schemas.User")],
+        )
+        edges = self.edges(build_drawio(facts_to_classes(facts), "test"))
+        self.assertEqual([("Admin", "User", "dependency", "admin.py: Admin validates schemas.User")],
+                         edges)
+
+    def test_the_full_member_list_survives_when_the_export_truncates(self) -> None:
+        methods = [f"+ method_{number}(value: int): None" for number in range(40)]
+        facts = facts_with([simple_class("Big", methods=methods)])
+        self.assertEqual(40, len(facts.classes[0].methods))
+
+        document = build_drawio(facts_to_classes(facts), "test")
+        root = document.find("diagram/mxGraphModel/root")
+        assert root is not None
+        operations = next(item for item in root if item.get("role") == "class-operations")
+        label = operations.get("label") or ""
+        self.assertIn("… 另有", label)
+        dropped = int(re.search(r"… 另有 (\d+) 项", label).group(1))
+        kept = sum(1 for line in label.splitlines() if line.startswith("+ method_"))
+        self.assertEqual(40, kept + dropped)
+
+    def test_an_inventory_with_no_changed_classes_refuses_to_export(self) -> None:
+        # Writing it would produce a document validate_drawio.py rejects, which
+        # is a worse failure than refusing up front.
+        facts = facts_with([simple_class("Only", change="unchanged", origin="agent")])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "facts.json"
+            facts_io.dump_facts(facts, path)
+            with self.assertRaises(facts_io.FactsError):
+                export_diagram(facts, Path(folder) / "direct.drawio", strict=False)
+            with quiet():
+                code = main(["--repo", str(ROOT), "--from-facts", str(path),
+                             "--output", str(Path(folder) / "out.drawio")])
+            self.assertEqual(2, code)
+            self.assertFalse((Path(folder) / "direct.drawio").exists())
+            self.assertFalse((Path(folder) / "out.drawio").exists())
+
+
+class FactsCommandLineTests(unittest.TestCase):
+    """Which artifacts a run produces, and how it fails."""
+
+    def test_no_diagram_is_requested_unless_output_is_given(self) -> None:
+        args = diagram_gen.parse_args(["--repo", str(ROOT), "--days", "3"])
+        self.assertIsNone(args.output)
+
+    def test_scanning_without_output_writes_no_diagram(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, \
+                patch("diagram_gen.collect_changes",
+                      return_value=([ChangedFile("a.py", "modified")], "HEAD..HEAD")), \
+                patch("diagram_gen.source_at_revision", return_value="class A: pass"), \
+                patch("diagram_gen.write_document") as writer, quiet():
+            code = main(["--repo", str(ROOT), "--base", "HEAD", "--head", "HEAD",
+                         "--facts", str(Path(folder) / "facts.json")])
+        self.assertEqual(0, code)
+        writer.assert_not_called()
+
+    def test_a_scope_mismatch_refuses_to_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "facts.json"
+            facts_io.dump_facts(
+                facts_io.Facts(scope={"base": "OLD", "head": "HEAD", "window": ""}), target
+            )
+            with patch("diagram_gen.collect_changes",
+                       return_value=([ChangedFile("a.py", "modified")], "HEAD..HEAD")), \
+                    patch("diagram_gen.source_at_revision", return_value="class A: pass"), \
+                    quiet():
+                code = main(["--repo", str(ROOT), "--base", "HEAD", "--head", "HEAD",
+                             "--facts", str(target)])
+            self.assertEqual(3, code)
+            self.assertEqual("OLD", facts_io.load_facts(target).scope["base"])
+
+    def test_strict_layout_conflicts_exit_two_without_a_traceback(self) -> None:
+        # build_drawio raises on --strict, and an uncaught raise here would print
+        # a traceback next to three other paths that report cleanly.
+        stderr = StringIO()
+        with tempfile.TemporaryDirectory() as folder, \
+                patch("diagram_gen.collect_changes",
+                      return_value=([ChangedFile("a.py", "modified")], "HEAD..HEAD")), \
+                patch("diagram_gen.source_at_revision", return_value="class A: pass"), \
+                patch("diagram_gen.optimize_layout", return_value=["edge crosses node"]), \
+                redirect_stderr(stderr), redirect_stdout(StringIO()):
+            code = main(["--repo", str(ROOT), "--base", "HEAD", "--head", "HEAD",
+                         "--facts", str(Path(folder) / "facts.json"),
+                         "--output", str(Path(folder) / "out.drawio"), "--strict"])
+        self.assertEqual(2, code)
+        self.assertIn("conflicts", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
 
 
 if __name__ == "__main__":

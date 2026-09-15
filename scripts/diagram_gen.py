@@ -15,10 +15,11 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import facts_io
 from layout_drawio import optimize as optimize_layout
 from style_drawio import (
     CHANGE_LEGEND_LABELS,
@@ -62,6 +63,10 @@ CHANGE_LABELS = {
     "removed": "删除",
     "unchanged": "",
 }
+
+# One order for both the inventory and the page, so a re-scan of unchanged
+# source produces the same bytes and the same node numbers.
+CHANGE_ORDER = {"added": 0, "modified": 1, "removed": 2, "unchanged": 3}
 
 IGNORED_BASES = {
     "ABC",
@@ -107,6 +112,14 @@ class ClassInfo:
     fields: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
     relations: list[tuple[str, str]] = field(default_factory=list)
+    # Review authors prose evidence ("stores", "injects"); the scanner only ever
+    # synthesizes a "declares" string. Keyed by the same (relation, target) pair
+    # that names the relation, so an empty map reproduces the synthesized form.
+    relation_evidence: dict[tuple[str, str], str] = field(default_factory=dict)
+    # A relation already resolved by the inventory. Pinning the exact class is
+    # how an id that disambiguates two identically-named classes survives the
+    # trip back into the diagram, which a name lookup alone cannot express.
+    relation_targets: dict[tuple[str, str], "ClassInfo"] = field(default_factory=dict)
 
 
 def run_git(repo: Path, arguments: Sequence[str], check: bool = True) -> str:
@@ -827,8 +840,12 @@ def add_graphic_legend(root: ET.Element, y: float) -> None:
 
 
 
+def _class_order(info: ClassInfo) -> tuple[int, str]:
+    return (CHANGE_ORDER[info.change], info.name)
+
+
 def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = False) -> ET.Element:
-    classes.sort(key=lambda item: ({"added": 0, "modified": 1, "removed": 2, "unchanged": 3}[item.change], item.name))
+    classes.sort(key=_class_order)
 
     # Measure and size every box before anything is positioned. The layout pass
     # reads these dimensions, and while relationship ports are stored as
@@ -896,9 +913,11 @@ def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = Fals
     # Keeping them all is what lets a lookup tell "unique" from "ambiguous".
     index: dict[str, list[str]] = {}
     placed: list[tuple[ClassInfo, str]] = []
+    placement: dict[int, str] = {}
     for number, (info, box) in enumerate(zip(classes, boxes), start=1):
         identifier = f"class-{number}"
         placed.append((info, identifier))
+        placement[id(info)] = identifier
         for key in dict.fromkeys((info.name, info.name.rsplit(".", 1)[-1])):
             index.setdefault(key, []).append(identifier)
         column = (number - 1) % CLASSES_PER_ROW
@@ -915,7 +934,13 @@ def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = Fals
     edge_index = 1
     for info, source_id in placed:
         for relation, raw_target in info.relations:
-            target_id, reason = resolve_relation(raw_target, source_id, index)
+            key = (relation, raw_target)
+            pinned = info.relation_targets.get(key)
+            if pinned is not None:
+                # The inventory already decided which class this points at.
+                target_id, reason = placement[id(pinned)], None
+            else:
+                target_id, reason = resolve_relation(raw_target, source_id, index)
             if target_id is None:
                 # Ambiguity is reported to stderr, never into the diagram: the
                 # reader can resolve a named edge, but the artifact must not
@@ -934,7 +959,8 @@ def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = Fals
                 source_id,
                 target_id,
                 relation,
-                f"{info.source}: {info.name} declares {raw_target}",
+                info.relation_evidence.get(key)
+                or f"{info.source}: {info.name} declares {raw_target}",
             )
             edge_index += 1
 
@@ -960,17 +986,148 @@ def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = Fals
     return mxfile
 
 
+def write_document(mxfile: ET.Element, output: Path) -> None:
+    """Serialize one diagram. The caller owns the tree."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tree = ET.ElementTree(mxfile)
+    ET.indent(tree, space="  ")
+    tree.write(output, encoding="utf-8", xml_declaration=True)
+
+
 def write_drawio(
     classes: list[ClassInfo],
     output: Path,
     scope_label: str,
     strict: bool = False,
 ) -> None:
-    mxfile = build_drawio(classes, scope_label, strict=strict)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    tree = ET.ElementTree(mxfile)
-    ET.indent(tree, space="  ")
-    tree.write(output, encoding="utf-8", xml_declaration=True)
+    write_document(build_drawio(list(classes), scope_label, strict=strict), output)
+
+
+def build_facts(
+    classes: list[ClassInfo],
+    scope: dict[str, str],
+    files: list[str],
+) -> facts_io.Facts:
+    """Turn one scan into the inventory.
+
+    Relations resolve here through the same function the diagram uses, against
+    inventory ids instead of node numbers, so the two can never disagree about
+    which target is ambiguous.
+    """
+    ordered = sorted(classes, key=_class_order)
+    facts: list[facts_io.ClassFact] = []
+    taken: set[str] = set()
+    for info in ordered:
+        identifier = facts_io.derive_id(info.name, taken)
+        taken.add(identifier)
+        facts.append(
+            facts_io.ClassFact(
+                id=identifier,
+                name=info.name,
+                kind=info.kind,
+                change=info.change,
+                source=info.source,
+                origin="scan",
+                fields=list(info.fields),
+                methods=list(info.methods),
+            )
+        )
+
+    index: dict[str, list[str]] = {}
+    for fact in facts:
+        for key in dict.fromkeys((fact.name, fact.name.rsplit(".", 1)[-1])):
+            index.setdefault(key, []).append(fact.id)
+
+    relations: list[facts_io.RelationFact] = []
+    warnings: list[str] = []
+    for fact, info in zip(facts, ordered):
+        for relation, raw_target in info.relations:
+            target_id, reason = resolve_relation(raw_target, fact.id, index)
+            relations.append(
+                facts_io.RelationFact(
+                    source_id=fact.id,
+                    target_id=target_id,
+                    target_declared=raw_target,
+                    kind=relation,
+                    evidence=f"{info.source}: {info.name} declares {raw_target}",
+                    origin="scan",
+                )
+            )
+            if reason:
+                warnings.append(
+                    f"relation not drawn: {info.source}: {info.name} declares "
+                    f"{raw_target} ({reason})"
+                )
+    return facts_io.Facts(
+        scope=dict(scope),
+        classes=facts,
+        relations=relations,
+        files=list(files),
+        warnings=warnings,
+    )
+
+
+def facts_to_classes(facts: facts_io.Facts) -> list[ClassInfo]:
+    """Restore the scanner's record shape, carrying the review's additions.
+
+    A relation the inventory left unresolved is not drawn even when a class of
+    that name happens to be on the page: `to: null` is the inventory's own
+    statement that this edge has no target here.
+    """
+    classes = [
+        ClassInfo(
+            fact.name,
+            fact.kind,
+            fact.source,
+            fact.change,
+            fields=list(fact.fields),
+            methods=list(fact.methods),
+        )
+        for fact in facts.classes
+    ]
+    by_id = {fact.id: info for fact, info in zip(facts.classes, classes)}
+
+    for relation in facts.relations:
+        source = by_id.get(relation.source_id)
+        target = by_id.get(relation.target_id) if relation.target_id else None
+        if source is None or target is None:
+            continue
+        key = (relation.kind, relation.target_declared or relation.target_id)
+        source.relations.append(key)
+        source.relation_evidence[key] = relation.evidence
+        source.relation_targets[key] = target
+    return classes
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]+", "-", value or "").strip("-").lower()[:40] or "ref"
+
+
+def default_facts_path(args: argparse.Namespace) -> Path:
+    """Where the inventory for this invocation belongs.
+
+    A base..head range is a stable identity, so re-running the same range lands
+    on the same file and merges into it. "--days" and "--files" are not
+    identities - the same arguments mean different commits tomorrow - so those
+    are dated, and a later run starts a new file instead of folding unrelated
+    facts into an old one.
+    """
+    if args.base:
+        stem = f"{_slug(args.base)}-{_slug(args.head)}"
+    elif args.files:
+        stem = f"{date.today().isoformat()}-files"
+    else:
+        stem = f"{date.today().isoformat()}-last-{args.days}-day"
+    return Path("docs/code-review") / f"{stem}-facts.json"
+
+
+def _extensions(spec: str) -> set[str]:
+    values = {value.strip().lower() for value in spec.split(",") if value.strip()}
+    return {value if value.startswith(".") else f".{value}" for value in values}
+
+
+def _resolve(path: Path, repo: Path) -> Path:
+    return (path if path.is_absolute() else repo / path).resolve()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -994,34 +1151,94 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fail instead of writing when XML geometry conflicts remain",
     )
     parser.add_argument(
+        "--facts",
+        type=Path,
+        default=None,
+        help="Inventory path to write (default: docs/code-review/<scope>-facts.json)",
+    )
+    parser.add_argument(
+        "--from-facts",
+        type=Path,
+        default=None,
+        help="Read an existing inventory as the source of truth instead of scanning",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/diagrams/incremental-class-diagram.drawio"),
-        help="Output .drawio path, relative to --repo by default",
+        default=None,
+        help="Also export a .drawio diagram here; omit it to build no diagram at all",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an inventory whose Git range differs from this run",
     )
     args = parser.parse_args(argv)
     args.repo = args.repo.resolve()
-    if args.days is None and not args.base and not args.files:
-        args.days = 1
-    if args.days is not None and args.days < 1:
-        parser.error("--days must be at least 1")
-    if args.head == "WORKTREE" and not args.base:
-        parser.error("--head WORKTREE requires --base")
+    if args.from_facts is not None:
+        for name in ("base", "days", "files"):
+            if getattr(args, name):
+                parser.error(f"--from-facts reads an existing inventory, so --{name} does not apply")
+        if args.facts is not None:
+            parser.error("--facts writes an inventory and --from-facts reads one; use one of them")
+    else:
+        if args.days is None and not args.base and not args.files:
+            args.days = 1
+        if args.days is not None and args.days < 1:
+            parser.error("--days must be at least 1")
+        if args.head == "WORKTREE" and not args.base:
+            parser.error("--head WORKTREE requires --base")
     if not args.repo.is_dir():
         parser.error(f"Repository directory does not exist: {args.repo}")
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    extensions = {value.strip().lower() for value in args.ext.split(",") if value.strip()}
-    extensions = {value if value.startswith(".") else f".{value}" for value in extensions}
+def export_diagram(facts: facts_io.Facts, output: Path, strict: bool) -> int:
+    """Write the diagram the inventory describes.
 
+    The export is a pure function of the inventory: geometry is measured against
+    the members as they stand, so nothing here can go stale, and no exported XML
+    is ever read back in.
+    """
+    if not any(fact.change != "unchanged" for fact in facts.classes):
+        raise facts_io.FactsError(
+            "the inventory has no added, modified, or removed classes, so an "
+            "incremental diagram would be empty and would fail validation"
+        )
+    classes = facts_to_classes(facts)
+    scope_label = str(facts.scope.get("label") or "explicit files")
+    write_drawio(classes, output, scope_label, strict=strict)
+    print(f"Wrote {len(classes)} class(es) to {output}")
+    print("Check the export with validate_drawio.py and layout_drawio.py --check.")
+    return 0
+
+
+def export_from_inventory(args: argparse.Namespace) -> int:
+    source = _resolve(args.from_facts, args.repo)
+    facts = facts_io.load_facts(source)
+    errors, warnings = facts_io.validate_facts(facts)
+    for warning in warnings:
+        print(f"WARN: {warning}", file=sys.stderr)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    if args.output is None:
+        print(f"{source} satisfies the inventory contract.")
+        return 0
+    return export_diagram(facts, _resolve(args.output, args.repo), args.strict)
+
+
+def scan_into_inventory(args: argparse.Namespace) -> int:
     try:
-        changes, scope_label = collect_changes(args, extensions)
+        changes, scope_label = collect_changes(args, _extensions(args.ext))
     except (RuntimeError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+
+    if not changes:
+        print("No matching changed files were found.", file=sys.stderr)
+        return 1
 
     classes: list[ClassInfo] = []
     explicit_files = bool(args.files)
@@ -1029,19 +1246,71 @@ def main(argv: Sequence[str] | None = None) -> int:
         text = source_at_revision(args.repo, changed, args.base, args.head, explicit_files)
         if text is not None:
             classes.extend(extract_classes(text, changed.path, changed.change))
-
-    if not changes:
-        print("No matching changed files were found.", file=sys.stderr)
-        return 1
     if not classes:
         print("No supported class-like declarations were found in the changed files.", file=sys.stderr)
         return 1
 
-    output = args.output if args.output.is_absolute() else args.repo / args.output
-    write_drawio(classes, output.resolve(), scope_label, strict=args.strict)
-    print(f"Wrote {len(classes)} changed class(es) to {output.resolve()}")
-    print("Review the diagram against source code, then run validate_drawio.py.")
-    return 0
+    fresh = build_facts(
+        classes,
+        scope={
+            "label": scope_label,
+            "base": args.base or "",
+            "head": args.head if args.base else "",
+            # Scopes that two revisions do not name are pinned to the day they
+            # were collected, so tomorrow's run is a new file rather than a
+            # merge with a range it never shared.
+            "window": "" if args.base else date.today().isoformat(),
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        },
+        files=[changed.path for changed in changes],
+    )
+
+    target = _resolve(args.facts or default_facts_path(args), args.repo)
+    if target.exists() and not args.force:
+        existing = facts_io.load_facts(target)
+        if not facts_io.scope_matches(existing.scope, fresh.scope):
+            print(
+                f"ERROR: {target} already holds a different Git range "
+                f"({existing.scope.get('base') or existing.scope.get('label')!r}). "
+                "Pass --force to overwrite it and drop the reviewed entries it holds.",
+                file=sys.stderr,
+            )
+            return 3
+        # Re-scanning the same range is the normal way to refresh the scanned
+        # half of the inventory. The reviewed half is not re-derivable, so it
+        # survives; dropping it is what made the old hand-edited XML fragile.
+        # merge_facts folds its notices into the result's warnings, so the loop
+        # below is the only place that reports them.
+        fresh = facts_io.merge_facts(existing, fresh)
+
+    errors, warnings = facts_io.validate_facts(fresh)
+    for warning in list(fresh.warnings) + warnings:
+        print(f"WARN: {warning}", file=sys.stderr)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+
+    facts_io.dump_facts(fresh, target)
+    print(f"Wrote {len(fresh.classes)} class(es) and {len(fresh.relations)} relation(s) to {target}")
+
+    if args.output is None:
+        print("No diagram requested; pass --output <path> to export one.")
+        return 0
+    return export_diagram(fresh, _resolve(args.output, args.repo), args.strict)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        if args.from_facts is not None:
+            return export_from_inventory(args)
+        return scan_into_inventory(args)
+    # build_drawio raises on --strict conflicts and the export refuses an
+    # all-unchanged inventory. Both are ordinary failures, not tracebacks.
+    except (facts_io.FactsError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

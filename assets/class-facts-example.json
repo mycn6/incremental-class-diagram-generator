@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "scope": {
+    "label": "示例：HEAD..WORKTREE",
+    "base": "HEAD",
+    "head": "WORKTREE",
+    "window": "",
+    "generated_at": "2026-09-15T00:00:00+08:00"
+  },
+  "classes": [
+    {
+      "id": "UserStatus",
+      "name": "UserStatus",
+      "kind": "enum",
+      "change": "added",
+      "source": "src/user/model.py",
+      "origin": "scan",
+      "fields": [
+        "ACTIVE",
+        "SUSPENDED",
+        "DELETED"
+      ],
+      "methods": []
+    },
+    {
+      "id": "UserService",
+      "name": "UserService",
+      "kind": "class",
+      "change": "added",
+      "source": "src/user/service.py",
+      "origin": "scan",
+      "fields": [
+        "- repository: UserRepository",
+        "- clock: Clock"
+      ],
+      "methods": [
+        "+ register(command: RegisterUser): User",
+        "+ suspend(user_id: str): None"
+      ]
+    },
+    {
+      "id": "UserController",
+      "name": "UserController",
+      "kind": "class",
+      "change": "modified",
+      "source": "src/user/controller.py",
+      "origin": "scan",
+      "fields": [
+        "- service: UserService"
+      ],
+      "methods": [
+        "+ post(request: Request): Response"
+      ]
+    },
+    {
+      "id": "UserRepository",
+      "name": "UserRepository",
+      "kind": "class",
+      "change": "modified",
+      "source": "src/user/repository.py",
+      "origin": "scan",
+      "fields": [
+        "- session: Session"
+      ],
+      "methods": [
+        "+ find(user_id: str): User"
+      ]
+    },
+    {
+      "id": "Repository",
+      "name": "Repository",
+      "kind": "interface",
+      "change": "unchanged",
+      "source": "src/core/repository.py",
+      "origin": "agent",
+      "fields": [],
+      "methods": [
+        "+ find(key: str): object"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "from": "UserRepository",
+      "to": "Repository",
+      "to_declared": "Repository",
+      "kind": "implementation",
+      "evidence": "src/user/repository.py: UserRepository implements Repository",
+      "origin": "scan"
+    },
+    {
+      "from": "UserService",
+      "to": "UserRepository",
+      "to_declared": "UserRepository",
+      "kind": "association",
+      "evidence": "src/user/service.py: UserService.__init__ stores UserRepository",
+      "origin": "agent"
+    },
+    {
+      "from": "UserService",
+      "to": "UserStatus",
+      "to_declared": "UserStatus",
+      "kind": "dependency",
+      "evidence": "src/user/service.py: UserService.suspend returns UserStatus",
+      "origin": "agent"
+    },
+    {
+      "from": "UserController",
+      "to": "UserService",
+      "to_declared": "UserService",
+      "kind": "association",
+      "evidence": "src/user/controller.py: UserController.__init__ injects UserService",
+      "origin": "agent"
+    },
+    {
+      "from": "UserService",
+      "to": null,
+      "to_declared": "Clock",
+      "kind": "dependency",
+      "evidence": "src/user/service.py: UserService.__init__ reads the injected Clock, which is not on this page",
+      "origin": "agent"
+    }
+  ],
+  "files": [
+    "src/user/model.py",
+    "src/user/service.py",
+    "src/user/controller.py",
+    "src/user/repository.py"
+  ],
+  "warnings": []
+}

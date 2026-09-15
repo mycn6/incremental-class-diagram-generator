@@ -1,4 +1,4 @@
 interface:
-  display_name: "增量类图与方案前置分析"
-  short_description: "从 Git 变更生成分区类图与独立设计审查报告"
-  default_prompt: "使用 $incremental-class-diagram-generator 分析当前 Git 变更，生成并优化真实 UML 分区的增量类图，并将代码问题、设计质量、设计模式与优化建议输出到独立审查报告。"
+  display_name: "增量代码事实清单与方案前置分析"
+  short_description: "从 Git 变更建立结构化事实清单与独立设计审查报告，按需导出类图"
+  default_prompt: "使用 $incremental-class-diagram-generator 分析当前 Git 变更，建立可核对的结构化事实清单，并将代码问题、设计质量、设计模式与优化建议输出到独立审查报告；需要类图时从清单导出。"
