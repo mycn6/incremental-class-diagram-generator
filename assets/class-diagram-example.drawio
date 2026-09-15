@@ -1,0 +1,369 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="incremental-class-diagram-generator">
+  <diagram id="incremental-class-diagram" name="增量类图">
+    <mxGraphModel grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1710" pageHeight="1338" math="0" shadow="0" layoutEngine="incremental-class-layered-v1">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <object id="title" label="增量类图｜自动扫描初稿" role="decoration">
+          <mxCell vertex="1" parent="1" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=26;fontStyle=1;fontColor=#172554;">
+            <mxGeometry as="geometry" x="40" y="20" width="1280" height="45" />
+          </mxCell>
+        </object>
+        <object id="scope" label="范围：example-base..example-head｜生成日期：2026-09-07&#10;自动扫描仅提取声明、Python 成员和显式继承／实现；不自动补充未变类型或代码问题，其他成员与关系必须结合源码复核。" role="note">
+          <mxCell vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;align=left;verticalAlign=middle;fillColor=#EFF6FF;strokeColor=#93C5FD;fontFamily=Microsoft YaHei;fontSize=14;spacing=10;">
+            <mxGeometry as="geometry" x="40" y="75" width="1280" height="70" />
+          </mxCell>
+        </object>
+        <object id="class-1" label="" role="class" kind="abstract" change="added" symbol="UserService" source="src/user/service.py">
+          <mxCell vertex="1" parent="1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;strokeWidth=2;container=1;collapsible=0;recursiveResize=0;align=center;verticalAlign=middle;spacing=0;fillColor=#DCFCE7;strokeColor=#16A34A;dashed=0;">
+            <mxGeometry as="geometry" x="475" y="307" width="285" height="210" />
+          </mxCell>
+        </object>
+        <object id="class-1--header" label="«abstract»&#10;[新增] UserService" role="class-header" for="class-1">
+          <mxCell vertex="1" parent="class-1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=14;fontStyle=3;align=center;verticalAlign=middle;spacing=4;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="0" width="285" height="52" />
+          </mxCell>
+        </object>
+        <object id="class-1--attributes" label="- repository: UserRepository" role="class-attributes" for="class-1">
+          <mxCell vertex="1" parent="class-1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="52" width="285" height="70" />
+          </mxCell>
+        </object>
+        <object id="class-1--operations" label="+ create_user(command): User" role="class-operations" for="class-1">
+          <mxCell vertex="1" parent="class-1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="122" width="285" height="88" />
+          </mxCell>
+        </object>
+        <object id="class-1--separator-1" label="" role="class-separator" for="class-1">
+          <mxCell vertex="1" parent="class-1" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#16A34A;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="51" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-1--separator-2" label="" role="class-separator" for="class-1">
+          <mxCell vertex="1" parent="class-1" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#16A34A;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="121" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-2" label="" role="class" kind="class" change="modified" symbol="UserController" source="src/user/controller.py">
+          <mxCell vertex="1" parent="1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;strokeWidth=2;container=1;collapsible=0;recursiveResize=0;align=center;verticalAlign=middle;spacing=0;fillColor=#FEF3C7;strokeColor=#D97706;dashed=0;">
+            <mxGeometry as="geometry" x="40" y="307" width="285" height="210" />
+          </mxCell>
+        </object>
+        <object id="class-2--header" label="[修改] UserController" role="class-header" for="class-2">
+          <mxCell vertex="1" parent="class-2" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;spacing=4;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="0" width="285" height="52" />
+          </mxCell>
+        </object>
+        <object id="class-2--attributes" label="- service: UserService" role="class-attributes" for="class-2">
+          <mxCell vertex="1" parent="class-2" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="52" width="285" height="70" />
+          </mxCell>
+        </object>
+        <object id="class-2--operations" label="+ create_user(request): Response" role="class-operations" for="class-2">
+          <mxCell vertex="1" parent="class-2" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="122" width="285" height="88" />
+          </mxCell>
+        </object>
+        <object id="class-2--separator-1" label="" role="class-separator" for="class-2">
+          <mxCell vertex="1" parent="class-2" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#D97706;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="51" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-2--separator-2" label="" role="class-separator" for="class-2">
+          <mxCell vertex="1" parent="class-2" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#D97706;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="121" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-3" label="" role="class" kind="struct" change="modified" symbol="UserRepository" source="src/user/repository.py">
+          <mxCell vertex="1" parent="1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;strokeWidth=2;container=1;collapsible=0;recursiveResize=0;align=center;verticalAlign=middle;spacing=0;fillColor=#FEF3C7;strokeColor=#D97706;dashed=0;">
+            <mxGeometry as="geometry" x="910" y="307" width="285" height="210" />
+          </mxCell>
+        </object>
+        <object id="class-3--header" label="«struct»&#10;[修改] UserRepository" role="class-header" for="class-3">
+          <mxCell vertex="1" parent="class-3" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;spacing=4;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="0" width="285" height="52" />
+          </mxCell>
+        </object>
+        <object id="class-3--attributes" label="- session: Session" role="class-attributes" for="class-3">
+          <mxCell vertex="1" parent="class-3" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="52" width="285" height="70" />
+          </mxCell>
+        </object>
+        <object id="class-3--operations" label="+ save(user): User" role="class-operations" for="class-3">
+          <mxCell vertex="1" parent="class-3" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="122" width="285" height="88" />
+          </mxCell>
+        </object>
+        <object id="class-3--separator-1" label="" role="class-separator" for="class-3">
+          <mxCell vertex="1" parent="class-3" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#D97706;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="51" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-3--separator-2" label="" role="class-separator" for="class-3">
+          <mxCell vertex="1" parent="class-3" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#D97706;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="121" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-4" label="" role="class" kind="enum" change="removed" symbol="UserStatus" source="src/user/status.py">
+          <mxCell vertex="1" parent="1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;strokeWidth=2;container=1;collapsible=0;recursiveResize=0;align=center;verticalAlign=middle;spacing=0;fillColor=#FEE2E2;strokeColor=#DC2626;dashed=1;">
+            <mxGeometry as="geometry" x="40" y="607" width="285" height="210" />
+          </mxCell>
+        </object>
+        <object id="class-4--header" label="«enumeration»&#10;[删除] UserStatus" role="class-header" for="class-4">
+          <mxCell vertex="1" parent="class-4" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;spacing=4;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="0" width="285" height="52" />
+          </mxCell>
+        </object>
+        <object id="class-4--literals" label="ACTIVE&#10;DISABLED" role="class-literals" for="class-4">
+          <mxCell vertex="1" parent="class-4" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="52" width="285" height="70" />
+          </mxCell>
+        </object>
+        <object id="class-4--operations" label="+ can_login(): bool" role="class-operations" for="class-4">
+          <mxCell vertex="1" parent="class-4" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="122" width="285" height="88" />
+          </mxCell>
+        </object>
+        <object id="class-4--separator-1" label="" role="class-separator" for="class-4">
+          <mxCell vertex="1" parent="class-4" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#DC2626;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="51" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-4--separator-2" label="" role="class-separator" for="class-4">
+          <mxCell vertex="1" parent="class-4" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#DC2626;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="121" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="class-5" label="" role="class" kind="interface" change="unchanged" symbol="Repository" source="src/core/repository.py">
+          <mxCell vertex="1" parent="1" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;strokeWidth=2;container=1;collapsible=0;recursiveResize=0;align=center;verticalAlign=middle;spacing=0;fillColor=#F3F4F6;strokeColor=#6B7280;dashed=0;">
+            <mxGeometry as="geometry" x="1345" y="307" width="285" height="210" />
+          </mxCell>
+        </object>
+        <object id="class-5--header" label="«interface»&#10;Repository" role="class-header" for="class-5">
+          <mxCell vertex="1" parent="class-5" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=14;fontStyle=1;align=center;verticalAlign=middle;spacing=4;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="0" width="285" height="52" />
+          </mxCell>
+        </object>
+        <object id="class-5--operations" label="+ save(entity): Entity" role="class-operations" for="class-5">
+          <mxCell vertex="1" parent="class-5" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=13;fontStyle=0;align=left;verticalAlign=top;spacing=8;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="52" width="285" height="158" />
+          </mxCell>
+        </object>
+        <object id="class-5--separator-1" label="" role="class-separator" for="class-5">
+          <mxCell vertex="1" parent="class-5" style="shape=line;direction=east;strokeWidth=1;connectable=0;strokeColor=#6B7280;fillColor=none;">
+            <mxGeometry as="geometry" x="0" y="51" width="285" height="1" />
+          </mxCell>
+        </object>
+        <object id="relation-1" label="association" role="relationship" relation="association" evidence="src/user/service.py: UserService declares UserRepository" layout_engine="incremental-class-layered-v1" layout_route="straight">
+          <mxCell edge="1" parent="1" source="class-1" target="class-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;startArrow=none;endArrow=open;endFill=0;dashed=0;exitX=1;exitY=0.5;exitPerimeter=1;entryX=0;entryY=0.5;entryPerimeter=1;">
+            <mxGeometry as="geometry" relative="1" />
+          </mxCell>
+        </object>
+        <object id="relation-2" label="dependency" role="relationship" relation="dependency" evidence="src/user/controller.py: UserController declares UserService" layout_engine="incremental-class-layered-v1" layout_route="straight">
+          <mxCell edge="1" parent="1" source="class-2" target="class-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;startArrow=none;endArrow=open;endFill=0;dashed=1;exitX=1;exitY=0.5;exitPerimeter=1;entryX=0;entryY=0.5;entryPerimeter=1;">
+            <mxGeometry as="geometry" relative="1" />
+          </mxCell>
+        </object>
+        <object id="relation-3" label="implementation" role="relationship" relation="implementation" evidence="src/user/repository.py: UserRepository declares Repository" layout_engine="incremental-class-layered-v1" layout_route="straight">
+          <mxCell edge="1" parent="1" source="class-3" target="class-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;startArrow=none;endArrow=block;endFill=0;dashed=1;exitX=1;exitY=0.5;exitPerimeter=1;entryX=0;entryY=0.5;entryPerimeter=1;">
+            <mxGeometry as="geometry" relative="1" />
+          </mxCell>
+        </object>
+        <object id="legend" label="" role="legend">
+          <mxCell vertex="1" parent="1" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#F8FAFC;strokeColor=#CBD5E1;">
+            <mxGeometry as="geometry" x="40" y="943" width="1280" height="315" />
+          </mxCell>
+        </object>
+        <object id="legend-title" label="类图图例｜所有图形均为原生可编辑对象" role="legend-text" legend_group="heading" legend_key="title">
+          <mxCell vertex="1" parent="legend" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=18;fontStyle=1;fontColor=#172554;">
+            <mxGeometry as="geometry" x="20" y="12" width="1235" height="30" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-heading" label="UML 类型" role="legend-text" legend_group="heading" legend_key="uml-type">
+          <mxCell vertex="1" parent="legend" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=15;fontStyle=1;fontColor=#334155;">
+            <mxGeometry as="geometry" x="20" y="48" width="160" height="24" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-class" label="" role="legend-item" legend_group="uml-type" legend_key="class">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;container=1;collapsible=0;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=2;">
+            <mxGeometry as="geometry" x="20" y="78" width="140" height="66" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-class--header" label="类" role="legend-item-section" legend_group="uml-type" legend_key="class" legend_part="header">
+          <mxCell vertex="1" parent="legend-uml-class" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="0" width="140" height="34" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-class--body" label="属性 / 操作" role="legend-item-section" legend_group="uml-type" legend_key="class" legend_part="body">
+          <mxCell vertex="1" parent="legend-uml-class" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=11;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="34" width="140" height="32" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-class--separator" label="" role="legend-item-section" legend_group="uml-type" legend_key="class" legend_part="separator">
+          <mxCell vertex="1" parent="legend-uml-class" style="shape=line;direction=east;strokeColor=#64748B;strokeWidth=1;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="33" width="140" height="1" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-interface" label="" role="legend-item" legend_group="uml-type" legend_key="interface">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;container=1;collapsible=0;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=2;">
+            <mxGeometry as="geometry" x="174" y="78" width="140" height="66" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-interface--header" label="«interface»&#10;接口" role="legend-item-section" legend_group="uml-type" legend_key="interface" legend_part="header">
+          <mxCell vertex="1" parent="legend-uml-interface" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="0" width="140" height="34" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-interface--body" label="操作" role="legend-item-section" legend_group="uml-type" legend_key="interface" legend_part="body">
+          <mxCell vertex="1" parent="legend-uml-interface" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=11;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="34" width="140" height="32" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-interface--separator" label="" role="legend-item-section" legend_group="uml-type" legend_key="interface" legend_part="separator">
+          <mxCell vertex="1" parent="legend-uml-interface" style="shape=line;direction=east;strokeColor=#64748B;strokeWidth=1;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="33" width="140" height="1" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-abstract" label="" role="legend-item" legend_group="uml-type" legend_key="abstract">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;container=1;collapsible=0;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=2;">
+            <mxGeometry as="geometry" x="328" y="78" width="140" height="66" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-abstract--header" label="«abstract»&#10;抽象类" role="legend-item-section" legend_group="uml-type" legend_key="abstract" legend_part="header">
+          <mxCell vertex="1" parent="legend-uml-abstract" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=12;fontStyle=3;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="0" width="140" height="34" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-abstract--body" label="属性 / 操作" role="legend-item-section" legend_group="uml-type" legend_key="abstract" legend_part="body">
+          <mxCell vertex="1" parent="legend-uml-abstract" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=11;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="34" width="140" height="32" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-abstract--separator" label="" role="legend-item-section" legend_group="uml-type" legend_key="abstract" legend_part="separator">
+          <mxCell vertex="1" parent="legend-uml-abstract" style="shape=line;direction=east;strokeColor=#64748B;strokeWidth=1;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="33" width="140" height="1" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-enum" label="" role="legend-item" legend_group="uml-type" legend_key="enum">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;container=1;collapsible=0;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=2;">
+            <mxGeometry as="geometry" x="482" y="78" width="140" height="66" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-enum--header" label="«enumeration»&#10;枚举" role="legend-item-section" legend_group="uml-type" legend_key="enum" legend_part="header">
+          <mxCell vertex="1" parent="legend-uml-enum" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="0" width="140" height="34" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-enum--body" label="常量 / 操作" role="legend-item-section" legend_group="uml-type" legend_key="enum" legend_part="body">
+          <mxCell vertex="1" parent="legend-uml-enum" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=11;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="34" width="140" height="32" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-enum--separator" label="" role="legend-item-section" legend_group="uml-type" legend_key="enum" legend_part="separator">
+          <mxCell vertex="1" parent="legend-uml-enum" style="shape=line;direction=east;strokeColor=#64748B;strokeWidth=1;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="33" width="140" height="1" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-struct" label="" role="legend-item" legend_group="uml-type" legend_key="struct">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;container=1;collapsible=0;fillColor=#FFFFFF;strokeColor=#64748B;strokeWidth=2;">
+            <mxGeometry as="geometry" x="636" y="78" width="140" height="66" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-struct--header" label="«struct»&#10;结构体" role="legend-item-section" legend_group="uml-type" legend_key="struct" legend_part="header">
+          <mxCell vertex="1" parent="legend-uml-struct" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="0" width="140" height="34" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-struct--body" label="属性 / 操作" role="legend-item-section" legend_group="uml-type" legend_key="struct" legend_part="body">
+          <mxCell vertex="1" parent="legend-uml-struct" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;fillColor=none;strokeColor=none;fontFamily=Microsoft YaHei;fontSize=11;align=center;verticalAlign=middle;">
+            <mxGeometry as="geometry" x="0" y="34" width="140" height="32" />
+          </mxCell>
+        </object>
+        <object id="legend-uml-struct--separator" label="" role="legend-item-section" legend_group="uml-type" legend_key="struct" legend_part="separator">
+          <mxCell vertex="1" parent="legend-uml-struct" style="shape=line;direction=east;strokeColor=#64748B;strokeWidth=1;connectable=0;">
+            <mxGeometry as="geometry" x="0" y="33" width="140" height="1" />
+          </mxCell>
+        </object>
+        <object id="legend-change-heading" label="Git 状态" role="legend-text" legend_group="heading" legend_key="change">
+          <mxCell vertex="1" parent="legend" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=15;fontStyle=1;fontColor=#334155;">
+            <mxGeometry as="geometry" x="810" y="48" width="160" height="24" />
+          </mxCell>
+        </object>
+        <object id="legend-change-added" label="新增" role="legend-item" legend_group="change" legend_key="added">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=14;strokeWidth=2;fillColor=#DCFCE7;strokeColor=#16A34A;dashed=0;">
+            <mxGeometry as="geometry" x="810" y="86" width="96" height="42" />
+          </mxCell>
+        </object>
+        <object id="legend-change-modified" label="修改" role="legend-item" legend_group="change" legend_key="modified">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=14;strokeWidth=2;fillColor=#FEF3C7;strokeColor=#D97706;dashed=0;">
+            <mxGeometry as="geometry" x="918" y="86" width="96" height="42" />
+          </mxCell>
+        </object>
+        <object id="legend-change-removed" label="删除" role="legend-item" legend_group="change" legend_key="removed">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=14;strokeWidth=2;fillColor=#FEE2E2;strokeColor=#DC2626;dashed=1;">
+            <mxGeometry as="geometry" x="1026" y="86" width="96" height="42" />
+          </mxCell>
+        </object>
+        <object id="legend-change-unchanged" label="未变" role="legend-item" legend_group="change" legend_key="unchanged">
+          <mxCell vertex="1" parent="legend" style="shape=rectangle;rounded=0;whiteSpace=wrap;html=0;align=center;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=14;strokeWidth=2;fillColor=#F3F4F6;strokeColor=#6B7280;dashed=0;">
+            <mxGeometry as="geometry" x="1134" y="86" width="96" height="42" />
+          </mxCell>
+        </object>
+        <object id="legend-relation-heading" label="类间关系" role="legend-text" legend_group="heading" legend_key="relationship">
+          <mxCell vertex="1" parent="legend" style="text;html=0;align=left;verticalAlign=middle;fontFamily=Microsoft YaHei;fontSize=15;fontStyle=1;fontColor=#334155;">
+            <mxGeometry as="geometry" x="20" y="155" width="160" height="24" />
+          </mxCell>
+        </object>
+        <object id="legend-relation-inheritance" label="继承" role="legend-edge" legend_group="relationship" legend_key="inheritance">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=none;endArrow=block;endFill=0;dashed=0;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="30" y="202" />
+              <mxPoint as="targetPoint" x="175" y="202" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="legend-relation-implementation" label="实现" role="legend-edge" legend_group="relationship" legend_key="implementation">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=none;endArrow=block;endFill=0;dashed=1;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="275" y="202" />
+              <mxPoint as="targetPoint" x="420" y="202" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="legend-relation-association" label="关联" role="legend-edge" legend_group="relationship" legend_key="association">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=none;endArrow=open;endFill=0;dashed=0;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="520" y="202" />
+              <mxPoint as="targetPoint" x="665" y="202" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="legend-relation-aggregation" label="聚合" role="legend-edge" legend_group="relationship" legend_key="aggregation">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=diamond;startFill=0;endArrow=none;dashed=0;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="30" y="270" />
+              <mxPoint as="targetPoint" x="175" y="270" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="legend-relation-composition" label="组合" role="legend-edge" legend_group="relationship" legend_key="composition">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=diamond;startFill=1;endArrow=none;dashed=0;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="275" y="270" />
+              <mxPoint as="targetPoint" x="420" y="270" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="legend-relation-dependency" label="依赖" role="legend-edge" legend_group="relationship" legend_key="dependency">
+          <mxCell edge="1" parent="legend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=0;strokeWidth=2;fontFamily=Microsoft YaHei;fontSize=14;labelBackgroundColor=#FFFFFF;startArrow=none;endArrow=open;endFill=0;dashed=1;">
+            <mxGeometry as="geometry" relative="1">
+              <mxPoint as="sourcePoint" x="520" y="270" />
+              <mxPoint as="targetPoint" x="665" y="270" />
+            </mxGeometry>
+          </mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,6 @@
+# Python 缓存与编译产物。AGENTS.md 工程纪律禁止把缓存和临时输出加入仓库。
+__pycache__/
+*.py[cod]
+
+# 本机 Claude Code 权限配置，含本机绝对路径，不入库。
+.claude/settings.local.json
