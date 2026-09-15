@@ -1,14 +1,13 @@
 # 本机 core.autocrlf=true 会在检出时把文本文件改写成 CRLF。下面两条 `-text` 只保证
-# 「检出不做转换」：文件进出仓库的字节与写下时一致。它们不决定脚本写出什么行尾。
+# 「检出不做转换」：文件进出仓库的字节与写下时一致。
 #
-# drawio XML 是本仓库的字节级契约（严格 UTF-8、不压缩）。但注意：三个序列化点
-# （diagram_gen.write_document、layout_drawio、style_drawio）都用
-# ET.ElementTree.write(path, encoding=...)，CPython 对文件名走文本模式，`\n` 按
-# os.linesep 落盘——Windows 写出 CRLF、Linux/macOS 写出 LF。同一份输入在不同平台
-# 产出的字节不同，逐字节确定性只在平台内成立。`-text` 让两种字节各自原样入库，
-# 协作者因此会看到整文件 diff。详见 AGENTS.md「已知限制：导出物的行尾随平台变化」。
+# 注意 `-text` 只覆盖 checkout 一侧，它管不了脚本写出什么行尾。行尾由写出方自己保证：
+# .drawio 的三个序列化点（diagram_gen.write_document、layout_drawio、style_drawio）
+# 都以二进制句柄写出（见 AGENTS.md「工程纪律」），因此恒为 LF；`-text` 让这份 LF
+# 原样入库、原样检出，不被 core.autocrlf 改写成 CRLF 而破坏字节级契约。
 *.drawio -text
 
-# 事实清单没有这个问题：facts_io.dump_facts 显式以 newline="\n" 写出，任何行尾
-# 转换都会让每次重扫产生一份整文件 diff，把真正改动的那几行淹掉。
+# 事实清单同样是 agent 可编辑的产物，必须是严格 UTF-8（中文证据串在其中）。
+# facts_io.dump_facts 显式以 newline="\n" 写出，任何行尾转换都会让每次重扫产生一份
+# 整文件 diff，把真正改动的那几行淹掉。
 *.json -text

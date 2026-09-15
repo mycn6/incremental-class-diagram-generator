@@ -991,7 +991,11 @@ def write_document(mxfile: ET.Element, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     tree = ET.ElementTree(mxfile)
     ET.indent(tree, space="  ")
-    tree.write(output, encoding="utf-8", xml_declaration=True)
+    # Hand ET a binary handle, never a path: given a filename it opens the file
+    # in text mode and translates "\n" to os.linesep, which would make the
+    # export's line endings depend on the host platform.
+    with open(output, "wb") as handle:
+        tree.write(handle, encoding="utf-8", xml_declaration=True)
 
 
 def write_drawio(

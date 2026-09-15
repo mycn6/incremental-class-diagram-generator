@@ -244,7 +244,10 @@ def main() -> int:
     document = ET.parse(args.path).getroot()
     apply(document)
     ET.indent(document)
-    ET.ElementTree(document).write(args.output or args.path, encoding="utf-8", xml_declaration=True)
+    # Binary handle, not a path: ET would translate "\n" to os.linesep and make
+    # the export's line endings platform dependent.
+    with open(args.output or args.path, "wb") as handle:
+        ET.ElementTree(document).write(handle, encoding="utf-8", xml_declaration=True)
     print("Styled from explicit metadata; semantic and visual review still required.")
     return 0
 

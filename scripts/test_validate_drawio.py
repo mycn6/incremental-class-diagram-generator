@@ -8,6 +8,7 @@ from dataclasses import fields
 from io import StringIO
 from pathlib import Path
 import re
+import sys
 from typing import Iterator
 import tempfile
 import unittest
@@ -28,7 +29,10 @@ from diagram_gen import (
     main,
 )
 from layout_drawio import ENGINE, SUPPORT_GAP, LayoutIssue, check_document, optimize
+from layout_drawio import main as layout_main
+from normalize_drawio import normalize
 from style_drawio import apply, set_style
+from style_drawio import main as style_main
 from text_layout import (
     ADVANCE_EM,
     MAX_CLASS_WIDTH,
@@ -939,6 +943,41 @@ def simple_class(identifier: str, **overrides) -> facts_io.ClassFact:
     return facts_io.ClassFact(**payload, extra=extra)
 
 
+def gutter_fixture() -> list[ClassInfo]:
+    """Two edges leaving one column and entering one target from the same side.
+
+    The router only reaches the outer gutter channel when both endpoints are
+    boxed in vertically, so a class needs a neighbour above and below it in its
+    own column before the top and bottom channels are refused. That is what
+    makes the smallest shape that shows the defect eight classes rather than
+    two.
+    """
+    info = {
+        name: ClassInfo(
+            name=name,
+            kind="class",
+            source="src/outer-lane.py",
+            change="added",
+            fields=[f"- {name.lower()}: int"],
+        )
+        for name in ("A", "X", "Y", "E", "M", "P", "Z", "Q")
+    }
+
+    def link(source: str, target: str, kind: str = "association") -> None:
+        key = (kind, target)
+        info[source].relations.append(key)
+        info[source].relation_evidence[key] = f"src/outer-lane.py: {source} uses {target}"
+        info[source].relation_targets[key] = info[target]
+
+    for name in ("A", "X", "Y", "E"):
+        link(name, "M")
+    for name in ("P", "Z", "Q"):
+        link("M", name)
+    link("X", "Z", "dependency")
+    link("Y", "Z", "dependency")
+    return list(info.values())
+
+
 def simple_relation(**overrides) -> facts_io.RelationFact:
     payload = {
         "source_id": "OrderService",
@@ -1215,6 +1254,87 @@ class FactsCommandLineTests(unittest.TestCase):
         self.assertEqual(2, code)
         self.assertIn("conflicts", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
+
+
+class ExportLineEndingTests(unittest.TestCase):
+    """Every .drawio write path emits LF, whatever the host platform is.
+
+    Handing `ET` a filename opens the file in text mode, where "\n" becomes
+    os.linesep: the same input would produce different bytes on Windows and on
+    Linux. Each writer opens a binary handle instead, so these assertions hold
+    on every platform rather than only on the one the suite runs on.
+    """
+
+    def assert_lf(self, path: Path) -> None:
+        raw = path.read_bytes()
+        self.assertNotIn(b"\r", raw, f"{path.name} was written with CRLF")
+        self.assertIn(b"\n", raw, f"{path.name} was not written at all")
+
+    def test_the_generator_writes_lf(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "generated.drawio"
+            with quiet():
+                code = main(["--repo", str(ROOT), "--from-facts",
+                             str(ROOT / "assets" / "class-facts-example.json"),
+                             "--output", str(output)])
+            self.assertEqual(0, code)
+            self.assert_lf(output)
+
+    def test_the_layout_command_writes_lf(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "laid-out.drawio"
+            with patch.object(sys, "argv", [
+                "layout_drawio.py", str(ROOT / "assets" / "class-diagram-example.drawio"),
+                "--output", str(output),
+            ]), quiet():
+                code = layout_main()
+            self.assertEqual(0, code)
+            self.assert_lf(output)
+
+    def test_the_style_command_writes_lf(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "styled.drawio"
+            with patch.object(sys, "argv", [
+                "style_drawio.py", str(ROOT / "assets" / "class-diagram-example.drawio"),
+                "--output", str(output),
+            ]), quiet():
+                code = style_main()
+            self.assertEqual(0, code)
+            self.assert_lf(output)
+
+    def test_the_normalizer_rewrites_only_line_endings(self) -> None:
+        source = (ROOT / "assets" / "class-diagram-example.drawio").read_bytes()
+        self.assertNotIn(b"\r", source, "the fixture itself drifted back to CRLF")
+        self.assertEqual(source, normalize(source))
+        self.assertEqual(source, normalize(source.replace(b"\n", b"\r\n")))
+
+    def test_a_bare_cr_is_refused_rather_than_guessed_at(self) -> None:
+        with self.assertRaises(ValueError):
+            normalize(b"<mxfile/>\r")
+
+
+class OuterLaneRegressionTests(unittest.TestCase):
+    """A documented limitation, pinned so a fix has an objective pass/fail.
+
+    `route_edges` assigns an outer lane by counting per channel name, and the
+    count only ever moves a horizontal line's y. The x of a gutter vertical
+    comes from a box edge alone, so two edges whose relevant box edges line up
+    are drawn on the same x and overlap instead of being spread apart. See
+    AGENTS.md「已知限制：外围通道的竖折线不分配 x 车道」.
+    """
+
+    @unittest.expectedFailure
+    def test_two_edges_entering_one_target_share_a_gutter_lane(self) -> None:
+        # X and Y both enter Z from the left, and both leave the same column,
+        # so all four of their gutter verticals derive from a box edge. Two
+        # classes in that column and one target column are enough to collide.
+        with quiet():
+            document = build_drawio(gutter_fixture(), "outer-lane")
+        reported = {
+            frozenset((issue.edge, issue.obstacle))
+            for issue in check_document(document)
+        }
+        self.assertNotIn(frozenset(("relation-2", "relation-6")), reported)
 
 
 if __name__ == "__main__":

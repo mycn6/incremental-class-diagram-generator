@@ -6,6 +6,7 @@
 - `references/` 承载事实清单契约、类图导出 XML 契约、视觉约定与评审标准。
 - `scripts/diagram_gen.py` 从 Git 变更提取保守的代码事实，写出事实清单；`.drawio` 导出是清单的纯函数，按需生成。
 - `scripts/facts_io.py` 定义事实清单的模式，负责序列化、按 `origin` 合并与结构校验。它不扫描源码，也不度量文字。
+- `scripts/normalize_drawio.py` 把一份 `.drawio` 的行尾归一化为 LF。它先校验严格 UTF-8 与 XML 良构，再只替换 CRLF——除此之外一个字节都不动。它是把 Windows 上行尾的 `.drawio` 重新收进仓库的**唯一**通道（见「工程纪律」）。
 - `scripts/style_drawio.py` 只依据显式元数据施加确定性视觉样式。
 - `scripts/layout_drawio.py` 执行确定性分层排布、显式正交布线，以及启发式 XML 几何检查。
 - `scripts/text_layout.py` 以单向（永不低估）的模型估算文字的渲染尺寸。它是节点尺寸的唯一事实来源：生成器与校验器必须共用它，否则两者对「文字是否装得下」的判断会分叉。任何其他模块都不得重复实现这套度量。
@@ -49,21 +50,23 @@
 
 ### 已知限制：外围通道的竖折线不分配 x 车道
 
-`layout_drawio.py` 的 `outer_indices` 按通道名（`top`/`bottom`/`gutter`）计数，车道偏移只加在横线的 y 上；gutter 的 x 由目标矩形推导，不含车道序号。分属不同通道名、却汇入同一目标同一侧的两条边因此拿到同一个 x，竖折线在重叠的 y 区间上叠住，检查器报 `edge-crossing`。
+`layout_drawio.py` 的 `outer_indices` 按通道名（`top`/`bottom`/`gutter`）计数，车道偏移只加在横线的 y 上；gutter 的竖线 x 直接由某一端的框边界推导（`source_rect.right + GUTTER` 之类），完全不含车道序号。因此**同一个 gutter 通道内**的两条边，只要相关的那一端框边界相同，竖线就落在同一个 x 上，在重叠的 y 区间里叠住。
 
-这是 2026-09-15 首次对真实仓库跑端到端时发现的**既有缺陷**，与「主产物改为事实清单」那次重构无关：`--base HEAD --head WORKTREE` 的纯扫描导出即报 1 条，补上复核关系后增至 6 条。小夹具盖不住它（`assets/class-diagram-example.drawio` 只有 2 条边），105 个测试全绿也不能说明它不存在。布局器重写模式加 `--max-iterations 40` 仍报同一条，说明这不是迭代次数问题。
+触发条件比「同一目标同一侧」更宽：竖线 x 只由框边界决定，所以**框同列**就撞。2026-09-15 用 8 类 / 9 关系的内存夹具实测，共出现三处共用 x——`class-5` 与 `class-8` 两个**不同**目标共用 `x=912`（二者同列），`class-3` 被两条边共用 `x=462`（同一目标同一侧），三条边共用 `x=368`（源端同列）。原描述里的「分属不同通道名」与代码不符：撞 x 的边全在同一个 `gutter` 通道内。
 
-**因此：`validate_drawio.py` 是导出的硬关口，`layout_drawio.py --check` 是尽力而为的几何检查。** 残余 `edge-crossing` 按如实记录处理——写进报告的「事实清单与类图」项，让复核者知道这份导出在密集汇入处存在折线重叠。不得手工改导出物的拐点或端点来消掉它（下次导出会覆盖），不得为了让它通过而删除关系。要真正修复必须改 `layout_drawio.py` 的车道分配，并配一个「两条边同侧汇入同一目标」的回归用例。
+这是 2026-09-15 首次对真实仓库跑端到端时发现的**既有缺陷**，与「主产物改为事实清单」那次重构无关：`--base HEAD --head WORKTREE` 的纯扫描导出即报 1 条，补上复核关系后增至 6 条。小夹具盖不住它（`assets/class-diagram-example.drawio` 只有 2 条边），当时 105 个测试全绿也不能说明它不存在。布局器重写模式加 `--max-iterations 40` 仍报同一条，说明这不是迭代次数问题。
 
-### 已知限制：导出物的行尾随平台变化
+**因此：`validate_drawio.py` 是导出的硬关口，`layout_drawio.py --check` 是尽力而为的几何检查。** 残余 `edge-crossing` 按如实记录处理——写进报告的「事实清单与类图」项，让复核者知道这份导出在密集汇入处存在折线重叠。不得手工改导出物的拐点或端点来消掉它（下次导出会覆盖），不得为了让它通过而删除关系。要真正修复必须改 `layout_drawio.py` 的车道分配；判据是下面那个回归用例，它现在是预期失败。
 
-三个 drawio 序列化点——`diagram_gen.write_document`、`layout_drawio`、`style_drawio`——都用 `ET.ElementTree(tree).write(path, encoding="utf-8", xml_declaration=True)`。CPython 在参数是**文件名**时走文本模式，`\n` 按 `os.linesep` 落盘，于是 Windows 上产出 CRLF、Linux/macOS 上产出 LF。2026-09-15 在本机实测确认（Python 3.12，连只含一个元素的探针树都写出 `\r\n`）。
+**已试过、不要重试的三种局部修法**（2026-09-15 在同一夹具上实测，基线 12 条 `edge-crossing`）：只给 gutter 竖线加车道偏移仍报 12 条；改按几何跨度排序分配车道报 13 条；改按端口 y 排序报 15 条。几何确实变了（竖线 x 从 368 变为 420），但一条也没消掉——因为给竖线分配不同的 x 会引入「端口 → 车道 x」的横移段，反而与别的竖线交叉，此消彼长。这是标准的通道布线问题，车道分配要同时满足三个约束：同端同列的两条边竖线不共线、竖线下落不穿内侧车道的横线、端口到车道的横移段不穿别的竖线。而且源侧与目标侧对车道顺序的要求可能互相矛盾，无解处需要三段式狗腿。修它是一轮独立工作，不是补丁。
 
-后果是**跨平台的逐字节确定性不成立**：同一份输入在两个平台上产出的 `.drawio` 字节不同。`.gitattributes` 给 `*.drawio` 声明 `-text`，两种字节各自原样入库，因此协作者会对一份内容相同的图看到整文件 diff。这不影响正确性——CRLF 是合法的 XML 空白，`validate_drawio.py` 两种都通过——但削弱了「同输入同输出」作为验证手段。
+复现夹具见 `scripts/test_validate_drawio.py` 的 `test_two_edges_entering_one_target_share_a_gutter_lane`：8 类 / 9 关系，纯内存构造，当前被标为 `expectedFailure`。真正修好车道分配后，去掉那个装饰器即可验证。
 
-`facts_io.dump_facts` 不受影响：它显式传 `newline="\n"`，所以清单始终是 LF。
+### 已修复：导出物的行尾曾随平台变化
 
-**修法**（本轮未做，因为要动 `layout_drawio.py` 与 `style_drawio.py` 这两个计划冻结的文件）：三处改成先以二进制模式打开再写，绕开文本模式——`with open(output, "wb") as handle: tree.write(handle, encoding="utf-8", xml_declaration=True)`。改完要把 `assets/class-diagram-example.drawio` 一并归一化为 LF（当前是 CRLF，是这个缺陷的产物）。已确认唯一的字节级测试 `test_example_bytes_round_trip_through_validate_bytes` 是把夹具字节喂给校验器、而不是与重新生成的文档比对，所以归一化不会让它变红。
+2026-09-15 之前，三个 drawio 序列化点——`diagram_gen.write_document`、`layout_drawio`、`style_drawio`——都用 `ET.ElementTree(tree).write(path, encoding="utf-8", xml_declaration=True)`。CPython 在参数是**文件名**时走文本模式，`\n` 按 `os.linesep` 落盘，于是 Windows 产出 CRLF、Linux/macOS 产出 LF，跨平台的逐字节确定性不成立。当时 `assets/class-diagram-example.drawio` 的 368 个 CR 就是这个缺陷的产物。
+
+现已三处都改为先开二进制句柄再写（见「工程纪律」），夹具一并归一化为 LF。这条记录留着，是因为它解释了两件事：为什么夹具曾经是 CRLF，以及为什么 `.gitattributes` 的 `-text` 单独并不足以保证字节级契约——`-text` 只保证检出不转换，管不了脚本写出什么。
 
 ## 事实清单契约
 
@@ -80,7 +83,8 @@
 ## 工程纪律
 
 - 编辑使用 `apply_patch`。
-- `.drawio` 文件只通过编辑器/文件工具或本仓库脚本创建与改写。不得通过 shell 重定向、内联 `-c` 脚本，或任何不保证 UTF-8 的通道写入。
+- `.drawio` 文件只通过编辑器/文件工具或本仓库脚本创建与改写。不得通过 shell 重定向、内联 `-c` 脚本，或任何不保证 UTF-8 的通道写入。行尾不合规的 `.drawio`（例如在 Windows 上手工编辑过）用 `scripts/normalize_drawio.py` 收回来，不要用 `tr`、`sed` 或重定向——那条禁令没有任何例外。
+- 写出 `.drawio` 必须先把文件以二进制模式打开，再交给 `ET` 写：`with open(output, "wb") as handle: tree.write(handle, encoding="utf-8", xml_declaration=True)`。直接把路径传给 `ET.ElementTree.write` 会走文本模式，`\n` 被按 `os.linesep` 翻译，Windows 上写出 CRLF、Linux/macOS 上写出 LF，跨平台的逐字节确定性随之失效。导出的行尾必须恒为 LF。
 - 事实清单同样是 agent 可编辑的产物，必须是严格 UTF-8（中文证据串在其中，理由同上）。脚本重扫时不得丢弃 `origin="agent"` 的条目；目标文件已存在且范围不同时必须拒绝而非覆盖。
 - 脚本保持零依赖，兼容 Python 3.10+。
 - 测试必须在内存中运行，不得删除用户文件或目录。
@@ -97,10 +101,11 @@
 2. `python -B scripts/validate_drawio.py assets/class-diagram-example.drawio`
 3. `python -B scripts/layout_drawio.py --check assets/class-diagram-example.drawio`
 4. `python -B scripts/facts_io.py --check assets/class-facts-example.json`
-5. `python -B <skill-creator>/scripts/quick_validate.py .`
+5. `python -B scripts/normalize_drawio.py --check assets/class-diagram-example.drawio`
+6. `python -B <skill-creator>/scripts/quick_validate.py .`
 
 当 `diagram_gen.py` 或 `layout_drawio.py` 变化时，通过回归测试套件覆盖其内存路径。实际的 draw.io 渲染仍是单独的人工检查；本机无兼容渲染器时必须记为「未执行」。`quick_validate.py` 本机不存在，同样记为未执行。
 
 `scope.generated_at` 是两次相同扫描之间唯一会变动的字段。比较两份清单前先归一化该字段，否则 diff 永远不空。
 
-生效的 skill 是 `~/.claude/skills/incremental-class-diagram-generator` 下的独立副本。改完仓库必须手动同步，用 `diff -r -q`（排除 `.git`、`__pycache__`、`.claude`）确认一致，再在副本目录里重跑上面 1–4——在仓库里绿不能证明副本是绿的。
+生效的 skill 是 `~/.claude/skills/incremental-class-diagram-generator` 下的独立副本。改完仓库必须手动同步，用 `diff -r -q`（排除 `.git`、`__pycache__`、`.claude`）确认一致，再在副本目录里重跑上面 1–5——在仓库里绿不能证明副本是绿的。
