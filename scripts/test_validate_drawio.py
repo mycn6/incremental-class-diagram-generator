@@ -27,11 +27,26 @@ from diagram_gen import (
     extract_python,
     facts_to_classes,
     main,
+    split_conflicting_page,
 )
-from layout_drawio import ENGINE, SUPPORT_GAP, LayoutIssue, check_document, optimize
+from layout_drawio import (
+    ENGINE,
+    PAGE_MARGIN,
+    ROUTE_CLEARANCE,
+    SUPPORT_GAP,
+    LayoutIssue,
+    check_document,
+    class_items,
+    edge_path,
+    optimize,
+    page_items,
+    page_root,
+    rect_for,
+    relationship_items,
+)
 from layout_drawio import main as layout_main
 from normalize_drawio import normalize
-from style_drawio import apply, set_style
+from style_drawio import RELATION_LEGEND_LABELS, apply, set_style
 from style_drawio import main as style_main
 from text_layout import (
     ADVANCE_EM,
@@ -129,6 +144,29 @@ class DiagramContractTests(unittest.TestCase):
         issues = check_document(self.document)
         self.assertTrue(any(issue.kind == "edge-node" for issue in issues))
 
+    def test_geometry_check_rejects_a_route_on_an_unrelated_class_border(self) -> None:
+        edge = self.obj("relation-2")
+        cell = edge.find("mxCell")
+        obstacle = rect_for(self.obj("class-3"))
+        assert cell is not None and obstacle is not None
+        geometry = cell.find("mxGeometry")
+        assert geometry is not None
+        for child in list(geometry):
+            geometry.remove(child)
+        points = ET.SubElement(geometry, "Array", {"as": "points"})
+        ET.SubElement(points, "mxPoint", {
+            "x": str(obstacle.left),
+            "y": str(obstacle.top - ROUTE_CLEARANCE),
+        })
+        ET.SubElement(points, "mxPoint", {
+            "x": str(obstacle.left),
+            "y": str(obstacle.bottom + ROUTE_CLEARANCE),
+        })
+        issues = check_document(self.document)
+        self.assertTrue(
+            any(issue.kind == "edge-node" and issue.obstacle == "class-3" for issue in issues)
+        )
+
     def test_geometry_check_detects_overlapping_relationships(self) -> None:
         first = self.obj("relation-2").find("mxCell")
         second = self.obj("relation-1").find("mxCell")
@@ -184,7 +222,8 @@ class DiagramContractTests(unittest.TestCase):
         self.assertTrue(any("class compartment must belong" in error for error in self.errors()))
 
     def test_enum_requires_literals_compartment(self) -> None:
-        self.root.remove(self.obj("class-4--literals"))
+        enum = next(item for item in self.root if item.get("role") == "class" and item.get("kind") == "enum")
+        self.root.remove(self.obj(f"{enum.get('id')}--literals"))
         self.assertTrue(any("exactly one class-literals" in error for error in self.errors()))
 
     def test_separator_must_be_native_line(self) -> None:
@@ -194,6 +233,8 @@ class DiagramContractTests(unittest.TestCase):
         self.assertTrue(any("separator must be a native line" in error for error in self.errors()))
 
     def test_abstract_header_must_be_italic(self) -> None:
+        self.obj("class-1").set("kind", "abstract")
+        apply(self.document)
         cell = self.obj("class-1--header").find("mxCell")
         assert cell is not None
         set_style(cell, {"fontStyle": "1"})
@@ -210,6 +251,15 @@ class DiagramContractTests(unittest.TestCase):
         assert cell is not None
         set_style(cell, {"dashed": "1"})
         self.assertTrue(any("arrow style" in error for error in self.errors()))
+
+    def test_relationship_visible_labels_are_chinese(self) -> None:
+        relationships = [item for item in self.root if item.get("role") == "relationship"]
+        self.assertTrue(relationships)
+        for item in relationships:
+            relation = item.get("relation", "")
+            self.assertEqual(RELATION_LEGEND_LABELS[relation], item.get("label"))
+        relationships[0].set("label", relationships[0].get("relation", ""))
+        self.assertTrue(any("visible relationship label" in error for error in self.errors()))
 
     def test_styling_is_idempotent_and_preserves_geometry(self) -> None:
         edges_before = [
@@ -457,8 +507,8 @@ class ClassBoxPlanningTests(unittest.TestCase):
         box = plan_class_box(
             "OrderService",
             (
-                SectionSpec("attributes", "class-attributes", ("- repository: UserRepository",), "（未自动提取属性）"),
-                SectionSpec("operations", "class-operations", ("+ create_user(command): User",), "（未自动提取操作）"),
+                SectionSpec("attributes", "class-attributes", ("- repository: UserRepository",), "（本类未声明显式属性）"),
+                SectionSpec("operations", "class-operations", ("+ create_user(command): User",), "（本类未声明显式操作）"),
             ),
             285.0,
         )
@@ -531,11 +581,11 @@ class ClassBoxPlanningTests(unittest.TestCase):
 
     def test_every_empty_compartment_keeps_its_authored_label(self) -> None:
         expected = {
-            "class": ("（未自动提取属性）", "（未自动提取操作）"),
-            "abstract": ("（未自动提取属性）", "（未自动提取操作）"),
-            "struct": ("（未自动提取属性）", "（未自动提取操作）"),
-            "interface": ("（未自动提取操作）",),
-            "enum": ("（未自动提取枚举常量）", "（无相关操作）"),
+            "class": ("（本类未声明显式属性）", "（本类未声明显式操作）"),
+            "abstract": ("（本类未声明显式属性）", "（本类未声明显式操作）"),
+            "struct": ("（本类未声明显式属性）", "（本类未声明显式操作）"),
+            "interface": ("（本类未声明显式操作）",),
+            "enum": ("（本枚举未声明显式常量）", "（本类未声明显式操作）"),
         }
         for kind, labels in expected.items():
             info = ClassInfo(name="X", kind=kind, source="x.py", change="modified")
@@ -543,6 +593,7 @@ class ClassBoxPlanningTests(unittest.TestCase):
             self.assertEqual(labels, tuple(section.label for section in box.sections))
             for section in box.sections:
                 self.assertNotIn("另有", section.label)
+                self.assertNotIn("未自动提取", section.label)
 
 
 class GeneratedSizingTests(unittest.TestCase):
@@ -978,6 +1029,137 @@ def gutter_fixture() -> list[ClassInfo]:
     return list(info.values())
 
 
+def dense_page_fixture() -> list[ClassInfo]:
+    """A 24-class / 14-relation page with several independent components."""
+    classes = gutter_fixture()
+    extra = {
+        f"N{index}": ClassInfo(
+            name=f"N{index}",
+            kind="class",
+            source="src/dense-page.py",
+            change="modified",
+            fields=[f"- value_{index}: int"],
+        )
+        for index in range(16)
+    }
+    classes.extend(extra.values())
+    for source, target in (
+        ("N0", "N15"),
+        ("N1", "N14"),
+        ("N2", "N13"),
+        ("N3", "N12"),
+        ("N4", "N11"),
+    ):
+        key = ("dependency", target)
+        extra[source].relations.append(key)
+        extra[source].relation_evidence[key] = f"src/dense-page.py: {source} uses {target}"
+        extra[source].relation_targets[key] = extra[target]
+    return classes
+
+
+def storage_backend_fixture() -> list[ClassInfo]:
+    """The v12 storage page shape with two local and two long fan-in edges."""
+    info = {
+        name: ClassInfo(
+            name=name,
+            kind="abstract" if name == "StorageBackend" else "class",
+            source=(
+                "backend/modules/document/service.py"
+                if name == "FileService"
+                else "backend/modules/enterprise/tests/test_manufacturer_mysql.py"
+                if name == "MemoryStorage"
+                else "backend/infrastructure/storage/backends.py"
+            ),
+            change="unchanged" if name == "FileService" else "modified",
+            fields=["+ provider: str"],
+            methods=[
+                "+ put(key, data): None",
+                "+ put_file(key, source): None",
+                "+ get(key): bytes",
+                "+ delete(key): None",
+                "+ exists(key): bool",
+            ],
+        )
+        for name in (
+            "LocalBackend", "MemoryStorage", "OssBackend", "StorageBackend", "FileService"
+        )
+    }
+    for source, kind in (
+        ("OssBackend", "inheritance"),
+        ("FileService", "association"),
+        ("LocalBackend", "inheritance"),
+        ("MemoryStorage", "inheritance"),
+    ):
+        key = (kind, "StorageBackend")
+        info[source].relations.append(key)
+        info[source].relation_evidence[key] = f"storage.py: {source} uses StorageBackend"
+        info[source].relation_topics[key] = ("storage-backend", "存储后端实现")
+        info[source].relation_targets[key] = info["StorageBackend"]
+    return list(info.values())
+
+
+def v10_topology_fixture() -> list[ClassInfo]:
+    """The real v10 shape: one 14-node/14-edge component plus 10 isolates."""
+    connected = (
+        "ContractFileService", "FileService", "StorageBackend", "LocalBackend",
+        "MemoryStorage", "OssBackend", "EnterpriseEntryService", "PreparedAttachment",
+        "StoredAttachment", "StreamingUploadPayload", "UploadPayload", "FileObject",
+        "_PreparedEncryptedContract", "EncryptedStream",
+    )
+    isolated = (
+        "DecryptionFailed", "EncryptedBlob", "ManufacturerMySQLTest", "MasterKeyProvider",
+        "_BoundedReadStream", "_CaptureDb", "_EmptyResult", "_EmptyScalars",
+        "_RowsResult", "_RowsScalars",
+    )
+    info = {
+        name: ClassInfo(
+            name=name,
+            kind="abstract" if name == "StorageBackend" else "class",
+            source=(
+                "backend/modules/enterprise/tests/test_file_reference_contract.py"
+                if name.startswith("_") and name != "_PreparedEncryptedContract"
+                else "backend/modules/enterprise/entry/service.py"
+            ),
+            change="modified",
+            fields=[f"+ {name.lower()}: object"],
+            methods=[f"+ handle_{index}(value): object" for index in range(1 + len(name) % 4)],
+        )
+        for name in (*connected, *isolated)
+    }
+
+    topics = {
+        "enterprise-attachment-upload": "企业附件上传",
+        "contract-file-encryption": "合同文件加密存储",
+        "storage-backend": "存储后端实现",
+    }
+
+    def link(source: str, target: str, kind: str, topic: str) -> None:
+        key = (kind, target)
+        info[source].relations.append(key)
+        info[source].relation_evidence[key] = f"v10.py: {source} uses {target}"
+        info[source].relation_topics[key] = (topic, topics[topic])
+        info[source].relation_targets[key] = info[target]
+
+    for source, target, kind, topic in (
+        ("ContractFileService", "FileService", "aggregation", "contract-file-encryption"),
+        ("ContractFileService", "_PreparedEncryptedContract", "dependency", "contract-file-encryption"),
+        ("ContractFileService", "FileObject", "dependency", "contract-file-encryption"),
+        ("EnterpriseEntryService", "ContractFileService", "dependency", "enterprise-attachment-upload"),
+        ("EnterpriseEntryService", "PreparedAttachment", "dependency", "enterprise-attachment-upload"),
+        ("EnterpriseEntryService", "StoredAttachment", "dependency", "enterprise-attachment-upload"),
+        ("PreparedAttachment", "StreamingUploadPayload", "association", "enterprise-attachment-upload"),
+        ("PreparedAttachment", "UploadPayload", "association", "enterprise-attachment-upload"),
+        ("StoredAttachment", "FileObject", "association", "enterprise-attachment-upload"),
+        ("_PreparedEncryptedContract", "EncryptedStream", "composition", "contract-file-encryption"),
+        ("FileService", "StorageBackend", "association", "storage-backend"),
+        ("LocalBackend", "StorageBackend", "inheritance", "storage-backend"),
+        ("MemoryStorage", "StorageBackend", "inheritance", "storage-backend"),
+        ("OssBackend", "StorageBackend", "inheritance", "storage-backend"),
+    ):
+        link(source, target, kind, topic)
+    return list(info.values())
+
+
 def simple_relation(**overrides) -> facts_io.RelationFact:
     payload = {
         "source_id": "OrderService",
@@ -1026,6 +1208,32 @@ class FactsSchemaTests(unittest.TestCase):
             facts_with([simple_class("OrderService")], [simple_relation(evidence="   ")])
         )
         self.assertTrue(any("evidence must not be empty" in error for error in errors), errors)
+
+    def test_a_relation_topic_requires_a_stable_key_and_chinese_label(self) -> None:
+        cases = (
+            (simple_relation(topic="orders"), "appear together"),
+            (simple_relation(topic_label="订单处理"), "appear together"),
+            (simple_relation(topic="Order Processing", topic_label="订单处理"), "kebab-case"),
+            (simple_relation(topic="order-processing", topic_label="order processing"), "Chinese"),
+        )
+        for relation, message in cases:
+            with self.subTest(message=message):
+                errors, _ = facts_io.validate_facts(
+                    facts_with([simple_class("OrderService"), simple_class("Repo")], [relation])
+                )
+                self.assertTrue(any(message in error for error in errors), errors)
+
+    def test_one_topic_key_cannot_have_two_visible_labels(self) -> None:
+        errors, _ = facts_io.validate_facts(
+            facts_with(
+                [simple_class("OrderService"), simple_class("Repo")],
+                [
+                    simple_relation(topic="order-processing", topic_label="订单处理"),
+                    simple_relation(kind="dependency", topic="order-processing", topic_label="订单保存"),
+                ],
+            )
+        )
+        self.assertTrue(any("uses both" in error for error in errors), errors)
 
     def test_a_source_outside_the_repository_is_refused(self) -> None:
         for source in ("", "/etc/passwd", "C:/tmp/x.py", "../outside.py"):
@@ -1103,6 +1311,20 @@ class FactsMergeTests(unittest.TestCase):
         self.assertTrue(facts_io.scope_matches({**current, "generated_at": "dawn"}, current))
         self.assertFalse(facts_io.scope_matches({**current, "window": "2020-01-01"}, current))
         self.assertFalse(facts_io.scope_matches({**current, "head": "HEAD~3"}, current))
+
+    def test_reviewed_topic_survives_when_the_scanner_rediscovers_the_relation(self) -> None:
+        classes = [simple_class("OrderService"), simple_class("Repo")]
+        existing = facts_with(
+            classes,
+            [simple_relation(topic="order-processing", topic_label="订单处理")],
+        )
+        fresh = facts_with(classes, [simple_relation(origin="scan")])
+        merged = facts_io.merge_facts(existing, fresh)
+        self.assertEqual(1, len(merged.relations))
+        self.assertEqual(
+            ("order-processing", "订单处理"),
+            (merged.relations[0].topic, merged.relations[0].topic_label),
+        )
 
 
 class FactsExportTests(unittest.TestCase):
@@ -1314,27 +1536,208 @@ class ExportLineEndingTests(unittest.TestCase):
 
 
 class OuterLaneRegressionTests(unittest.TestCase):
-    """A documented limitation, pinned so a fix has an objective pass/fail.
+    """Dense gutter routes use independent lanes without intersections."""
 
-    `route_edges` assigns an outer lane by counting per channel name, and the
-    count only ever moves a horizontal line's y. The x of a gutter vertical
-    comes from a box edge alone, so two edges whose relevant box edges line up
-    are drawn on the same x and overlap instead of being spread apart. See
-    AGENTS.md「已知限制：外围通道的竖折线不分配 x 车道」.
-    """
-
-    @unittest.expectedFailure
     def test_two_edges_entering_one_target_share_a_gutter_lane(self) -> None:
-        # X and Y both enter Z from the left, and both leave the same column,
-        # so all four of their gutter verticals derive from a box edge. Two
-        # classes in that column and one target column are enough to collide.
+        classes = gutter_fixture()
+        self.assertEqual(8, len(classes))
+        self.assertEqual(9, sum(len(info.relations) for info in classes))
         with quiet():
-            document = build_drawio(gutter_fixture(), "outer-lane")
-        reported = {
-            frozenset((issue.edge, issue.obstacle))
-            for issue in check_document(document)
+            document = build_drawio(classes, "outer-lane")
+        self.assertEqual([], check_document(document))
+        pages = document.findall("diagram")
+        routes = {
+            item.get("layout_route")
+            for page in pages
+            for item in relationship_items(page_root(page))
         }
-        self.assertNotIn(frozenset(("relation-2", "relation-6")), reported)
+        self.assertTrue("outer-dogleg" in routes or len(pages) > 1)
+        self.assertEqual(9, sum(len(relationship_items(page_root(page))) for page in pages))
+        for page in pages:
+            root = page_root(page)
+            rects = {
+                identifier: rect
+                for identifier, item in class_items(root).items()
+                if (rect := rect_for(item)) is not None
+            }
+            points = [
+                point
+                for item in relationship_items(root)
+                if (path := edge_path(item, rects)) is not None
+                for point in path
+            ]
+            if not points:
+                continue
+            model = page.find("mxGraphModel")
+            assert model is not None
+            self.assertGreater(min(rect.left for rect in rects.values()), 40)
+            self.assertGreaterEqual(min(point.x for point in points), 0)
+            self.assertGreaterEqual(min(point.y for point in points), 0)
+            self.assertLessEqual(max(point.x for point in points), float(model.get("pageWidth", "0")))
+            self.assertLessEqual(max(point.y for point in points), float(model.get("pageHeight", "0")))
+        once = ET.tostring(document)
+        with quiet():
+            optimize(document)
+        self.assertEqual(once, ET.tostring(document))
+
+    def test_dense_page_keeps_independent_components_out_of_each_others_routes(self) -> None:
+        classes = dense_page_fixture()
+        self.assertEqual(24, len(classes))
+        self.assertEqual(14, sum(len(info.relations) for info in classes))
+        with quiet():
+            document = build_drawio(classes, "dense-page")
+        self.assertEqual([], check_document(document))
+
+    def test_real_v10_connected_topology_has_no_geometry_conflicts(self) -> None:
+        classes = v10_topology_fixture()
+        self.assertEqual(24, len(classes))
+        self.assertEqual(14, sum(len(info.relations) for info in classes))
+        with quiet():
+            document = build_drawio(classes, "v10-topology")
+        self.assertEqual([], validate_document(document))
+        self.assertEqual([], check_document(document))
+        relationships = [
+            item
+            for page in document.findall("diagram")
+            for item in relationship_items(page_root(page))
+        ]
+        self.assertEqual(14, len(relationships))
+        pages = document.findall("diagram")
+        self.assertEqual("类型总览", pages[0].get("name"))
+        self.assertEqual(0, len(relationship_items(page_root(pages[0]))))
+        for page in pages[1:]:
+            name = page.get("name", "")
+            self.assertTrue(name.startswith("关系详图｜"), name)
+            self.assertRegex(name, r"[\u3400-\u9fff]")
+            self.assertNotRegex(name, r"关系详图\s*\d+$")
+            self.assertNotRegex(name, r"Service|Backend|Attachment|Payload")
+            self.assertTrue(page.get("relation_topics"), name)
+            self.assertTrue(page.get("anchor_types"), name)
+        self.assertEqual(
+            {"enterprise-attachment-upload", "contract-file-encryption", "storage-backend"},
+            {item.get("topic") for item in relationships},
+        )
+        storage_routes: dict[str, str] = {}
+        for page in pages[1:]:
+            root = page_root(page)
+            symbols = {
+                identifier: item.get("symbol", "")
+                for identifier, item in class_items(root).items()
+            }
+            for item in relationship_items(root):
+                cell = item.find("mxCell")
+                if cell is None or symbols.get(cell.get("target", "")) != "StorageBackend":
+                    continue
+                storage_routes[symbols.get(cell.get("source", ""), "")] = item.get("layout_route", "")
+        self.assertEqual(4, len(storage_routes))
+        self.assertEqual(2, sum(route == "orthogonal" for route in storage_routes.values()))
+        self.assertEqual(
+            2,
+            sum(route in {"outer", "outer-dogleg"} for route in storage_routes.values()),
+        )
+        for page in pages:
+            model = page.find("mxGraphModel")
+            assert model is not None
+            items = page_items(page_root(page))
+            usable_right = float(model.get("pageWidth", "0")) - PAGE_MARGIN
+            for identifier in ("title", "scope", "legend"):
+                rect = rect_for(items[identifier])
+                assert rect is not None
+                self.assertAlmostEqual(usable_right, rect.right)
+            legend = rect_for(items["legend"])
+            legend_title = rect_for(items["legend-title"])
+            assert legend is not None and legend_title is not None
+            self.assertAlmostEqual(legend.width - 20.0, legend_title.right)
+            class_rects = {
+                identifier: rect
+                for identifier, item in class_items(page_root(page)).items()
+                if (rect := rect_for(item)) is not None
+            }
+            route_points = [
+                point
+                for relationship in relationship_items(page_root(page))
+                if (path := edge_path(relationship, class_rects)) is not None
+                for point in path
+            ]
+            content_top = min(
+                [rect.top for rect in class_rects.values()]
+                + [point.y for point in route_points]
+            )
+            content_bottom = max(
+                [rect.bottom for rect in class_rects.values()]
+                + [point.y for point in route_points]
+            )
+            header_bottom = max(
+                rect.bottom
+                for identifier in ("title", "scope")
+                if (rect := rect_for(items[identifier])) is not None
+            )
+            self.assertAlmostEqual(SUPPORT_GAP, content_top - header_bottom)
+            self.assertAlmostEqual(SUPPORT_GAP, legend.top - content_bottom)
+            self.assertAlmostEqual(legend.bottom + PAGE_MARGIN, float(model.get("pageHeight", "0")))
+
+    def test_storage_fan_in_keeps_local_edges_short_and_long_edges_peripheral(self) -> None:
+        with quiet():
+            document = build_drawio(storage_backend_fixture(), "storage-backend")
+        self.assertEqual([], check_document(document))
+        routes: list[tuple[float, str, float, float, float, float]] = []
+        for page in document.findall("diagram"):
+            root = page_root(page)
+            rects = {
+                identifier: rect
+                for identifier, item in class_items(root).items()
+                if (rect := rect_for(item)) is not None
+            }
+            for item in relationship_items(root):
+                cell = item.find("mxCell")
+                if cell is not None:
+                    source = rects[cell.get("source", "")]
+                    path = edge_path(item, rects)
+                    assert path is not None
+                    routes.append((
+                        source.top,
+                        item.get("layout_route", ""),
+                        min(point.x for point in path),
+                        max(point.x for point in path),
+                        min(rect.left for rect in rects.values()),
+                        max(rect.right for rect in rects.values()),
+                    ))
+        ordered = sorted(routes)
+        ordered_routes = [route for _, route, *_ in ordered]
+        self.assertEqual(["orthogonal", "orthogonal"], ordered_routes[:2])
+        self.assertTrue(all(route in {"outer", "outer-dogleg"} for route in ordered_routes[2:]))
+        self.assertLess(ordered[2][2], ordered[2][4])
+        self.assertGreater(ordered[3][3], ordered[3][5])
+
+    def test_multipage_fallback_preserves_every_type_and_relation_once(self) -> None:
+        classes = [
+            ClassInfo(name=name, kind="class", source="src/pages.py", change="modified")
+            for name in ("A", "B", "C")
+        ]
+        for source, target in ((classes[0], classes[1]), (classes[0], classes[2])):
+            key = ("dependency", target.name)
+            source.relations.append(key)
+            source.relation_evidence[key] = f"src/pages.py: {source.name} uses {target.name}"
+            source.relation_targets[key] = target
+        with quiet():
+            single = build_drawio(classes, "multipage-contract")
+            document, issues = split_conflicting_page(single)
+        self.assertEqual([], issues)
+        pages = document.findall("diagram")
+        self.assertGreaterEqual(len(pages), 2)
+        overview = pages[0]
+        self.assertEqual("类型总览", overview.get("name"))
+        self.assertEqual(3, len(class_items(page_root(overview))))
+        self.assertEqual([], relationship_items(page_root(overview)))
+        detail_relationships = [
+            item
+            for page in pages[1:]
+            for item in relationship_items(page_root(page))
+        ]
+        self.assertEqual(2, len(detail_relationships))
+        self.assertEqual(2, len({item.get("id") for item in detail_relationships}))
+        self.assertEqual([], validate_document(document))
+        self.assertEqual([], check_document(document))
 
 
 if __name__ == "__main__":

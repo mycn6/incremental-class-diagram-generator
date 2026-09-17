@@ -86,6 +86,8 @@
       "to_declared": "Repository",
       "kind": "implementation",
       "evidence": "src/user/repository.py: UserRepository implements Repository",
+      "topic": "user-account-management",
+      "topic_label": "用户账户管理",
       "origin": "scan"
     },
     {
@@ -94,6 +96,8 @@
       "to_declared": "UserRepository",
       "kind": "association",
       "evidence": "src/user/service.py: UserService.__init__ stores UserRepository",
+      "topic": "user-account-management",
+      "topic_label": "用户账户管理",
       "origin": "agent"
     },
     {
@@ -102,6 +106,8 @@
       "to_declared": "UserStatus",
       "kind": "dependency",
       "evidence": "src/user/service.py: UserService.suspend returns UserStatus",
+      "topic": "user-account-management",
+      "topic_label": "用户账户管理",
       "origin": "agent"
     },
     {
@@ -110,6 +116,8 @@
       "to_declared": "UserService",
       "kind": "association",
       "evidence": "src/user/controller.py: UserController.__init__ injects UserService",
+      "topic": "user-account-management",
+      "topic_label": "用户账户管理",
       "origin": "agent"
     },
     {

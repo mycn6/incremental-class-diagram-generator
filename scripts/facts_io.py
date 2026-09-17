@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,7 +34,12 @@ RELATION_KINDS = (
 ORIGINS = ("scan", "agent")
 
 CLASS_KEYS = ("id", "name", "kind", "change", "source", "origin", "fields", "methods")
-RELATION_KEYS = ("from", "to", "to_declared", "kind", "evidence", "origin")
+RELATION_KEYS = (
+    "from", "to", "to_declared", "kind", "evidence", "origin",
+    "topic", "topic_label",
+)
+TOPIC_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
 
 
 class FactsError(Exception):
@@ -65,6 +71,8 @@ class RelationFact:
     kind: str
     evidence: str
     origin: str = "scan"
+    topic: str = ""
+    topic_label: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -133,6 +141,9 @@ def _relation_to_payload(fact: RelationFact) -> dict[str, Any]:
         "evidence": fact.evidence,
         "origin": fact.origin,
     }
+    if fact.topic:
+        payload["topic"] = fact.topic
+        payload["topic_label"] = fact.topic_label
     payload.update(fact.extra)
     return payload
 
@@ -149,6 +160,8 @@ def _relation_from_payload(payload: dict[str, Any], where: str) -> RelationFact:
         kind=str(payload.get("kind", "")),
         evidence=str(payload.get("evidence", "")),
         origin=str(payload.get("origin", "scan")),
+        topic=str(payload.get("topic", "")),
+        topic_label=str(payload.get("topic_label", "")),
         extra=extra,
     )
 
@@ -271,6 +284,7 @@ def validate_facts(facts: Facts) -> tuple[list[str], list[str]]:
         if problem:
             errors.append(f"{fact.id}: {problem}")
 
+    topic_labels: dict[str, str] = {}
     for number, fact in enumerate(facts.relations, start=1):
         where = f"relation {number} ({fact.source_id} -> {fact.target_declared or fact.target_id})"
         if fact.kind not in RELATION_KINDS:
@@ -285,6 +299,18 @@ def validate_facts(facts: Facts) -> tuple[list[str], list[str]]:
             errors.append(f"{where}: target {fact.target_id!r} is not a class in this inventory")
         if fact.target_id is None and not fact.target_declared.strip():
             errors.append(f"{where}: an unresolved relation must still name the declared target")
+        if bool(fact.topic) != bool(fact.topic_label):
+            errors.append(f"{where}: topic and topic_label must appear together")
+        if fact.topic:
+            if TOPIC_PATTERN.fullmatch(fact.topic) is None:
+                errors.append(f"{where}: topic must be a lowercase kebab-case key")
+            if CJK_PATTERN.search(fact.topic_label) is None:
+                errors.append(f"{where}: topic_label must contain a Chinese business description")
+            previous = topic_labels.setdefault(fact.topic, fact.topic_label)
+            if previous != fact.topic_label:
+                errors.append(
+                    f"{where}: topic {fact.topic!r} uses both {previous!r} and {fact.topic_label!r}"
+                )
         short = fact.target_declared.rsplit(".", 1)[-1]
         if short and short not in fact.evidence:
             warnings.append(
@@ -328,6 +354,16 @@ def merge_facts(existing: Facts, fresh: Facts) -> Facts:
         kept_classes.append(fact)
 
     known_ids = fresh_class_ids | {fact.id for fact in kept_classes}
+    existing_topics = {
+        (fact.source_id, fact.target_id, fact.kind): (fact.topic, fact.topic_label)
+        for fact in existing.relations
+        if fact.topic and fact.topic_label
+    }
+    for fact in fresh.relations:
+        topic = existing_topics.get((fact.source_id, fact.target_id, fact.kind))
+        if topic is not None and not fact.topic:
+            fact.topic, fact.topic_label = topic
+
     fresh_edges = {(fact.source_id, fact.target_id, fact.kind) for fact in fresh.relations}
     kept_relations: list[RelationFact] = []
     for fact in existing.relations:

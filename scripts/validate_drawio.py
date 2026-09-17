@@ -444,10 +444,19 @@ def validate_document(document: ET.Element) -> list[str]:
                     fail(f"{identifier}: invalid or missing relationship type")
                 if not (item.get("evidence") or "").strip():
                     fail(f"{identifier}: relationship needs evidence")
+                topic = item.get("topic", "")
+                topic_label = item.get("topic_label", "")
+                if bool(topic) != bool(topic_label):
+                    fail(f"{identifier}: topic and topic_label must appear together")
+                if topic_label and CJK_TEXT.search(topic_label) is None:
+                    fail(f"{identifier}: topic_label must contain a Chinese business description")
                 geometry = cell.find("mxGeometry")
                 if geometry is None or geometry.get("relative") != "1":
                     fail(f"{identifier}: edge needs relative geometry")
                 if relation in RELATION_STYLES:
+                    expected_label = RELATION_LEGEND_LABELS[relation]
+                    if visible(item.get("label")).strip() != expected_label:
+                        fail(f"{identifier}: visible relationship label must be {expected_label}")
                     styles = style_dict(cell.get("style"))
                     for key_name, expected in RELATION_STYLES[relation].items():
                         if styles.get(key_name) != expected:
@@ -456,6 +465,15 @@ def validate_document(document: ET.Element) -> list[str]:
 
             if is_edge and role not in {"relationship", "legend-edge"}:
                 fail(f"{identifier}: edges must use role=relationship or role=legend-edge")
+
+        page_relationships = [item for item, _ in items.values() if item.get("role") == "relationship"]
+        if page_name.startswith("关系详图｜"):
+            labels = {item.get("topic_label", "") for item in page_relationships} - {""}
+            if labels and not any(label in page_name for label in labels):
+                fail("relationship detail page name must include a reviewed Chinese business topic")
+            expected_topics = sorted({item.get("topic", "") for item in page_relationships} - {""})
+            if expected_topics and page.get("relation_topics", "").split(",") != expected_topics:
+                fail("relationship detail page relation_topics metadata is incomplete")
 
         for identifier in class_ids:
             class_item, _ = items[identifier]

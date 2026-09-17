@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+from collections import Counter
+import copy
 import re
 import subprocess
 import sys
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import facts_io
-from layout_drawio import optimize as optimize_layout
+from layout_drawio import LayoutIssue, optimize as optimize_layout, optimize_page
 from style_drawio import (
     CHANGE_LEGEND_LABELS,
     CHANGE_STYLES,
@@ -77,9 +79,9 @@ IGNORED_BASES = {
     "TypedDict",
 }
 
-# Page grid. The origin, gaps, and legend box are fixed; every pitch, the row
-# count, and the page size are derived from measured box heights so a taller box
-# can never collide with the legend below it or run off the page.
+# The initial page grid only supplies deterministic input coordinates. The
+# layout pass later packs the header, routed content, and legend from their
+# actual bounds and derives the final page size.
 CLASS_ORIGIN_X = 40.0
 CLASS_ORIGIN_Y = 175.0
 CLASS_COLUMN_GAP = 40.0
@@ -116,6 +118,10 @@ class ClassInfo:
     # synthesizes a "declares" string. Keyed by the same (relation, target) pair
     # that names the relation, so an empty map reproduces the synthesized form.
     relation_evidence: dict[tuple[str, str], str] = field(default_factory=dict)
+    # Reviewed Chinese business topics drive semantic pagination and visible
+    # page titles. The scanner leaves this empty rather than guessing meaning
+    # from an English class name.
+    relation_topics: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
     # A relation already resolved by the inventory. Pinning the exact class is
     # how an id that disambiguates two identically-named classes survives the
     # trip back into the diagram, which a name lookup alone cannot express.
@@ -481,16 +487,16 @@ def class_sections(info: ClassInfo) -> tuple[SectionSpec, ...]:
     """
     if info.kind == "interface":
         return (
-            SectionSpec("operations", "class-operations", tuple(info.methods), "（未自动提取操作）"),
+            SectionSpec("operations", "class-operations", tuple(info.methods), "（本类未声明显式操作）"),
         )
     if info.kind == "enum":
         return (
-            SectionSpec("literals", "class-literals", tuple(info.fields), "（未自动提取枚举常量）"),
-            SectionSpec("operations", "class-operations", tuple(info.methods), "（无相关操作）"),
+            SectionSpec("literals", "class-literals", tuple(info.fields), "（本枚举未声明显式常量）"),
+            SectionSpec("operations", "class-operations", tuple(info.methods), "（本类未声明显式操作）"),
         )
     return (
-        SectionSpec("attributes", "class-attributes", tuple(info.fields), "（未自动提取属性）"),
-        SectionSpec("operations", "class-operations", tuple(info.methods), "（未自动提取操作）"),
+        SectionSpec("attributes", "class-attributes", tuple(info.fields), "（本类未声明显式属性）"),
+        SectionSpec("operations", "class-operations", tuple(info.methods), "（本类未声明显式操作）"),
     )
 
 
@@ -607,17 +613,23 @@ def add_relationship(
     target: str,
     relation: str,
     evidence: str,
+    topic: str = "",
+    topic_label: str = "",
 ) -> None:
+    metadata = {
+        "id": identifier,
+        "label": RELATION_LEGEND_LABELS[relation],
+        "role": "relationship",
+        "relation": relation,
+        "evidence": evidence,
+    }
+    if topic:
+        metadata["topic"] = topic
+        metadata["topic_label"] = topic_label
     wrapper = ET.SubElement(
         root,
         "object",
-        {
-            "id": identifier,
-            "label": relation,
-            "role": "relationship",
-            "relation": relation,
-            "evidence": evidence,
-        },
+        metadata,
     )
     cell = ET.SubElement(
         wrapper,
@@ -844,6 +856,489 @@ def _class_order(info: ClassInfo) -> tuple[int, str]:
     return (CHANGE_ORDER[info.change], info.name)
 
 
+def _page_cell(item: ET.Element) -> ET.Element | None:
+    return item if item.tag == "mxCell" else item.find("mxCell")
+
+
+def _page_view(
+    source: ET.Element,
+    relationship_ids: set[str],
+    *,
+    keep_all_classes: bool,
+    page_number: int,
+    page_name: str,
+) -> ET.Element:
+    """Clone one generated page into an overview or relationship detail view."""
+    page = copy.deepcopy(source)
+    page.set("id", f"incremental-class-diagram-{page_number}")
+    page.set("name", page_name)
+    root = page.find("mxGraphModel/root")
+    if root is None:
+        raise ValueError("Generated page has no mxGraphModel/root")
+
+    relationships = {
+        item.get("id", ""): item
+        for item in root
+        if item.get("role") == "relationship"
+    }
+    needed_classes: set[str] = set()
+    for identifier in relationship_ids:
+        item = relationships.get(identifier)
+        cell = _page_cell(item) if item is not None else None
+        if cell is not None:
+            needed_classes.update((cell.get("source", ""), cell.get("target", "")))
+
+    removed_classes = {
+        item.get("id", "")
+        for item in root
+        if item.get("role") == "class"
+        and not keep_all_classes
+        and item.get("id", "") not in needed_classes
+    }
+    for item in list(root):
+        role = item.get("role")
+        identifier = item.get("id", "")
+        cell = _page_cell(item)
+        parent = cell.get("parent", "") if cell is not None else ""
+        if role == "relationship" and identifier not in relationship_ids:
+            root.remove(item)
+        elif identifier in removed_classes or item.get("for", "") in removed_classes or parent in removed_classes:
+            root.remove(item)
+
+    # Routing consumes relationships in XML order. Reorder the surviving edges
+    # by semantic content so a harmless inventory reorder cannot change which
+    # edge receives the first lane and, through that, the chosen pagination.
+    page_relationships = [item for item in root if item.get("role") == "relationship"]
+    if page_relationships:
+        first_index = min(list(root).index(item) for item in page_relationships)
+        for item in page_relationships:
+            root.remove(item)
+
+        def relationship_key(item: ET.Element) -> tuple[str, ...]:
+            cell = _page_cell(item)
+            return (
+                item.get("topic", "~"),
+                cell.get("source", "") if cell is not None else "",
+                cell.get("target", "") if cell is not None else "",
+                item.get("relation", ""),
+                item.get("evidence", ""),
+                item.get("id", ""),
+            )
+
+        for offset, item in enumerate(sorted(page_relationships, key=relationship_key)):
+            root.insert(first_index + offset, item)
+
+    title = next((item for item in root if item.get("id") == "title"), None)
+    if title is not None:
+        title.set("label", f"增量类图｜{page_name}")
+    scope = next((item for item in root if item.get("id") == "scope"), None)
+    if scope is not None:
+        scope.set(
+            "label",
+            f"{scope.get('label', '')}\n页面：{page_name}；类型总览不画关系，关系详图可重复展示端点类型。",
+        )
+        scope_cell = _page_cell(scope)
+        scope_geometry = scope_cell.find("mxGeometry") if scope_cell is not None else None
+        if scope_geometry is not None:
+            scope_geometry.set("height", _dim(max(float(scope_geometry.get("height", "0")), 80.0)))
+    return page
+
+
+def _route_issues(issues: list[LayoutIssue]) -> list[LayoutIssue]:
+    return [
+        issue
+        for issue in issues
+        if getattr(issue, "kind", "") in {"edge-node", "edge-crossing", "edge-overlap"}
+    ]
+
+
+def _relation_sort_key(
+    identifier: str,
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> tuple[str, ...]:
+    item = relationships[identifier]
+    cell = _page_cell(item)
+    source = cell.get("source", "") if cell is not None else ""
+    target = cell.get("target", "") if cell is not None else ""
+    return (
+        item.get("topic", "~"),
+        classes.get(source, ET.Element("missing")).get("symbol", source),
+        classes.get(target, ET.Element("missing")).get("symbol", target),
+        item.get("relation", ""),
+        item.get("evidence", ""),
+        identifier,
+    )
+
+
+def _relation_affinity(
+    first_id: str,
+    second_id: str,
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> int:
+    """Rank evidence-backed reasons for keeping two relations on one page."""
+    first = relationships[first_id]
+    second = relationships[second_id]
+    first_cell = _page_cell(first)
+    second_cell = _page_cell(second)
+    if first_cell is None or second_cell is None:
+        return 0
+    score = 0
+    first_topic = first.get("topic", "")
+    if first_topic and first_topic == second.get("topic", ""):
+        score += 1000
+    first_nodes = {first_cell.get("source", ""), first_cell.get("target", "")}
+    second_nodes = {second_cell.get("source", ""), second_cell.get("target", "")}
+    score += 200 * len((first_nodes & second_nodes) - {""})
+    first_sources = {
+        classes[node].get("source", "")
+        for node in first_nodes
+        if node in classes
+    }
+    second_sources = {
+        classes[node].get("source", "")
+        for node in second_nodes
+        if node in classes
+    }
+    if (first_sources & second_sources) - {""}:
+        score += 40
+    first_dirs = {str(Path(value).parent).replace("\\", "/") for value in first_sources if value}
+    second_dirs = {str(Path(value).parent).replace("\\", "/") for value in second_sources if value}
+    if first_dirs & second_dirs:
+        score += 20
+    if first.get("relation") == second.get("relation"):
+        score += 5
+    return score
+
+
+def _initial_relation_units(
+    relation_ids: list[str],
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> list[frozenset[str]]:
+    """Keep reviewed topics intact; cluster unreviewed edges by structural affinity."""
+    topic_groups: dict[str, set[str]] = {}
+    unreviewed: set[str] = set()
+    for identifier in relation_ids:
+        topic = relationships[identifier].get("topic", "")
+        if topic:
+            topic_groups.setdefault(topic, set()).add(identifier)
+        else:
+            unreviewed.add(identifier)
+
+    units = [frozenset(group) for _, group in sorted(topic_groups.items())]
+    while unreviewed:
+        seed = min(unreviewed, key=lambda value: _relation_sort_key(value, relationships, classes))
+        unreviewed.remove(seed)
+        component = {seed}
+        changed = True
+        while changed:
+            changed = False
+            for candidate in sorted(
+                unreviewed,
+                key=lambda value: _relation_sort_key(value, relationships, classes),
+            ):
+                if any(
+                    _relation_affinity(candidate, member, relationships, classes) >= 20
+                    for member in component
+                ):
+                    component.add(candidate)
+                    unreviewed.remove(candidate)
+                    changed = True
+        units.append(frozenset(component))
+    return sorted(
+        units,
+        key=lambda group: min(
+            _relation_sort_key(identifier, relationships, classes)
+            for identifier in group
+        ),
+    )
+
+
+def _semantic_bisect(
+    relation_ids: frozenset[str],
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Cut a conflicted topic at its weakest structural seam, not its id midpoint."""
+    ordered = sorted(
+        relation_ids,
+        key=lambda value: _relation_sort_key(value, relationships, classes),
+    )
+    if len(ordered) == 2:
+        return frozenset([ordered[0]]), frozenset([ordered[1]])
+    seed_pairs = [
+        (
+            _relation_affinity(first, second, relationships, classes),
+            _relation_sort_key(first, relationships, classes),
+            _relation_sort_key(second, relationships, classes),
+            first,
+            second,
+        )
+        for index, first in enumerate(ordered)
+        for second in ordered[index + 1:]
+    ]
+    _, _, _, left_seed, right_seed = min(seed_pairs)
+    left = {left_seed}
+    right = {right_seed}
+    remaining = [value for value in ordered if value not in {left_seed, right_seed}]
+    remaining.sort(
+        key=lambda value: (
+            -max(
+                _relation_affinity(value, left_seed, relationships, classes),
+                _relation_affinity(value, right_seed, relationships, classes),
+            ),
+            _relation_sort_key(value, relationships, classes),
+        )
+    )
+    for identifier in remaining:
+        left_score = sum(
+            _relation_affinity(identifier, member, relationships, classes)
+            for member in left
+        ) / len(left)
+        right_score = sum(
+            _relation_affinity(identifier, member, relationships, classes)
+            for member in right
+        ) / len(right)
+        if left_score > right_score or (left_score == right_score and len(left) <= len(right)):
+            left.add(identifier)
+        else:
+            right.add(identifier)
+    return frozenset(left), frozenset(right)
+
+
+def _group_affinity(
+    first: frozenset[str],
+    second: frozenset[str],
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> int:
+    return sum(
+        _relation_affinity(left, right, relationships, classes)
+        for left in first
+        for right in second
+    )
+
+
+def _page_topic_name(
+    relation_ids: frozenset[str],
+    relationships: dict[str, ET.Element],
+) -> str:
+    topic_counts = Counter(
+        (relationships[identifier].get("topic", ""), relationships[identifier].get("topic_label", ""))
+        for identifier in relation_ids
+        if relationships[identifier].get("topic", "")
+    )
+    if topic_counts:
+        topics = sorted(topic_counts, key=lambda value: (-topic_counts[value], value[0], value[1]))
+        label = "、".join(value[1] for value in topics[:2])
+        if len(topics) > 2:
+            label += "等"
+        return f"关系详图｜{label}"
+
+    kind_counts = Counter(relationships[identifier].get("relation", "") for identifier in relation_ids)
+    kinds = sorted(kind_counts, key=lambda value: (-kind_counts[value], value))
+    if len(kinds) <= 2:
+        label = "、".join(RELATION_LEGEND_LABELS.get(value, "类间") for value in kinds)
+        return f"关系详图｜{label}关系"
+    return "关系详图｜类间关系"
+
+
+def _rename_relation_page(
+    page: ET.Element,
+    page_number: int,
+    page_name: str,
+    relation_ids: frozenset[str],
+    relationships: dict[str, ET.Element],
+    classes: dict[str, ET.Element],
+) -> None:
+    page.set("id", f"incremental-class-diagram-{page_number}")
+    page.set("name", page_name)
+    topics = sorted({relationships[value].get("topic", "") for value in relation_ids} - {""})
+    if topics:
+        page.set("relation_topics", ",".join(topics))
+    degrees: Counter[str] = Counter()
+    for identifier in relation_ids:
+        cell = _page_cell(relationships[identifier])
+        if cell is not None:
+            degrees.update((cell.get("source", ""), cell.get("target", "")))
+    anchors = sorted(
+        (identifier for identifier in degrees if identifier in classes),
+        key=lambda value: (-degrees[value], classes[value].get("symbol", value)),
+    )[:2]
+    if anchors:
+        page.set("anchor_types", ",".join(classes[value].get("symbol", value) for value in anchors))
+
+    root = page.find("mxGraphModel/root")
+    if root is None:
+        return
+    title = next((item for item in root if item.get("id") == "title"), None)
+    if title is not None:
+        title.set("label", f"增量类图｜{page_name}")
+    scope = next((item for item in root if item.get("id") == "scope"), None)
+    if scope is not None:
+        prefix = scope.get("label", "").rsplit("\n页面：", 1)[0]
+        scope.set(
+            "label",
+            f"{prefix}\n页面：{page_name}；类型总览不画关系，关系详图可重复展示端点类型。",
+        )
+
+
+def split_conflicting_page(mxfile: ET.Element) -> tuple[ET.Element, list[LayoutIssue]]:
+    """Replace a conflicted page with an overview and semantic, compact detail pages."""
+    source = mxfile.find("diagram")
+    if source is None:
+        return mxfile, []
+    root = source.find("mxGraphModel/root")
+    if root is None:
+        return mxfile, []
+    relationships = {
+        item.get("id", ""): item
+        for item in root
+        if item.get("role") == "relationship"
+    }
+    classes = {
+        item.get("id", ""): item
+        for item in root
+        if item.get("role") == "class"
+    }
+    relation_ids = sorted(
+        relationships,
+        key=lambda value: _relation_sort_key(value, relationships, classes),
+    )
+    if len(relation_ids) < 2:
+        return mxfile, optimize_layout(mxfile)
+
+    overview = _page_view(
+        source,
+        set(),
+        keep_all_classes=True,
+        page_number=1,
+        page_name="类型总览",
+    )
+    overview_issues = optimize_page(overview)
+
+    cache: dict[frozenset[str], tuple[ET.Element, list[LayoutIssue]]] = {}
+
+    def candidate(group: frozenset[str]) -> tuple[ET.Element, list[LayoutIssue]]:
+        cached = cache.get(group)
+        if cached is not None:
+            return copy.deepcopy(cached[0]), list(cached[1])
+        candidate = _page_view(
+            source,
+            set(group),
+            keep_all_classes=False,
+            page_number=2,
+            page_name="关系详图",
+        )
+        issues = optimize_page(candidate, max_iterations=2)
+        cache[group] = (copy.deepcopy(candidate), list(issues))
+        return candidate, issues
+
+    def feasible_units(group: frozenset[str]) -> list[frozenset[str]]:
+        _, issues = candidate(group)
+        if not _route_issues(issues) or len(group) == 1:
+            return [group]
+        left, right = _semantic_bisect(group, relationships, classes)
+        return [*feasible_units(left), *feasible_units(right)]
+
+    units: list[frozenset[str]] = []
+    for group in _initial_relation_units(relation_ids, relationships, classes):
+        units.extend(feasible_units(group))
+
+    def normalize(groups: list[frozenset[str]]) -> tuple[frozenset[str], ...]:
+        return tuple(sorted(groups, key=lambda group: tuple(sorted(group))))
+
+    def partition_rank(groups: tuple[frozenset[str], ...]) -> tuple[object, ...]:
+        cohesion = sum(
+            _relation_affinity(first, second, relationships, classes)
+            for group in groups
+            for index, first in enumerate(sorted(group))
+            for second in sorted(group)[index + 1:]
+        )
+        return (len(groups), -cohesion, tuple(tuple(sorted(group)) for group in groups))
+
+    memo: dict[tuple[frozenset[str], ...], tuple[frozenset[str], ...]] = {}
+    state_budget = max(32, min(128, len(units) * len(units) * 4))
+    visited = 0
+
+    def merge_search(state: tuple[frozenset[str], ...]) -> tuple[frozenset[str], ...]:
+        nonlocal visited
+        if state in memo:
+            return memo[state]
+        visited += 1
+        best = state
+        if visited > state_budget:
+            memo[state] = best
+            return best
+        pairs = [
+            (
+                -_group_affinity(state[left], state[right], relationships, classes),
+                -len(state[left] | state[right]),
+                tuple(sorted(state[left])),
+                tuple(sorted(state[right])),
+                left,
+                right,
+            )
+            for left in range(len(state))
+            for right in range(left + 1, len(state))
+        ]
+        for _, _, _, _, left, right in sorted(pairs):
+            merged = state[left] | state[right]
+            _, issues = candidate(merged)
+            if _route_issues(issues):
+                continue
+            next_state = normalize([
+                group
+                for index, group in enumerate(state)
+                if index not in {left, right}
+            ] + [merged])
+            result = merge_search(next_state)
+            if partition_rank(result) < partition_rank(best):
+                best = result
+            # The all-relations detail page was already attempted before this
+            # fallback. Once two clean pages exist, no deeper branch can improve
+            # the page count and further geometry trials only add latency.
+            if len(best) <= 2:
+                break
+        memo[state] = best
+        return best
+
+    all_relations = frozenset(relation_ids)
+    _, all_relation_issues = candidate(all_relations)
+    groups = (
+        [all_relations]
+        if not _route_issues(all_relation_issues)
+        else list(merge_search(normalize(units)))
+    )
+    groups.sort(key=lambda group: (_page_topic_name(group, relationships), tuple(sorted(group))))
+
+    base_names = [_page_topic_name(group, relationships) for group in groups]
+    name_counts = Counter(base_names)
+    used_names: Counter[str] = Counter()
+    accepted: list[ET.Element] = []
+    accepted_issues: list[LayoutIssue] = []
+    for index, (group, base_name) in enumerate(zip(groups, base_names), start=1):
+        page, issues = candidate(group)
+        name = base_name
+        if name_counts[base_name] > 1:
+            kind_counts = Counter(relationships[value].get("relation", "") for value in group)
+            dominant = sorted(kind_counts, key=lambda value: (-kind_counts[value], value))[0]
+            name = f"{base_name}｜{RELATION_LEGEND_LABELS.get(dominant, '类间')}关系"
+        used_names[name] += 1
+        if used_names[name] > 1:
+            name = f"{name}（第{used_names[name]}组）"
+        _rename_relation_page(page, index + 1, name, group, relationships, classes)
+        accepted.append(page)
+        accepted_issues.extend(issues)
+
+    result = ET.Element("mxfile", dict(mxfile.attrib))
+    result.append(overview)
+    result.extend(accepted)
+    return result, [*overview_issues, *accepted_issues]
+
+
 def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = False) -> ET.Element:
     classes.sort(key=_class_order)
 
@@ -961,13 +1456,20 @@ def build_drawio(classes: list[ClassInfo], scope_label: str, strict: bool = Fals
                 relation,
                 info.relation_evidence.get(key)
                 or f"{info.source}: {info.name} declares {raw_target}",
+                *info.relation_topics.get(key, ("", "")),
             )
             edge_index += 1
 
     add_graphic_legend(root, legend_y)
 
     apply_styles(mxfile)
+    # Candidate relationship pages must start from the same styled, unlaid-out
+    # template. Reusing the failed all-types layout would make pagination depend
+    # on stale coordinates from classes that the candidate page removed.
+    pagination_source = copy.deepcopy(mxfile)
     layout_issues = optimize_layout(mxfile)
+    if _route_issues(layout_issues):
+        mxfile, layout_issues = split_conflicting_page(pagination_source)
     if layout_issues:
         details = "; ".join(str(issue) for issue in layout_issues[:5])
         if strict:
@@ -1099,6 +1601,8 @@ def facts_to_classes(facts: facts_io.Facts) -> list[ClassInfo]:
         key = (relation.kind, relation.target_declared or relation.target_id)
         source.relations.append(key)
         source.relation_evidence[key] = relation.evidence
+        if relation.topic:
+            source.relation_topics[key] = (relation.topic, relation.topic_label)
         source.relation_targets[key] = target
     return classes
 

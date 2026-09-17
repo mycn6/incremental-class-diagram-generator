@@ -52,6 +52,7 @@ docs/code-review/<范围标识>-facts.json
     { "from": "OrderService", "to": "BaseService", "to_declared": "BaseService",
       "kind": "inheritance",
       "evidence": "src/order.py: OrderService declares BaseService",
+      "topic": "order-processing", "topic_label": "订单处理",
       "origin": "scan" },
     { "from": "OrderService", "to": null, "to_declared": "User",
       "kind": "inheritance",
@@ -88,8 +89,11 @@ docs/code-review/<范围标识>-facts.json
 | `kind` | `inheritance`｜`implementation`｜`association`｜`aggregation`｜`composition`｜`dependency` |
 | `evidence` | 非空，必须与边指向的类讲同一件事 |
 | `origin` | `scan`｜`agent` |
+| `topic`／`topic_label` | 可选且必须成对出现。前者是稳定机器键，后者是经源码复核的中文业务短语，用于关系分页与页面命名 |
 
 键名未知的额外字段一律原样保留，脚本不删。
+
+扫描器不生成业务主题。需要交付多页关系图时，执行 agent 根据源码职责和关系证据补充主题；不得把英文类名直接翻译后当成业务含义。同一 `topic` 必须始终使用同一个 `topic_label`。同一范围重扫时，已经复核的主题按关系三元组保留，即使结构关系重新由扫描器生成也不丢失。
 
 ## 按来源合并
 
